@@ -31,7 +31,7 @@ Every input record passes through the `ai_manager` module to communicate with a 
 2. Parses unstructured PDF report text into a strict, validated JSON object containing four key metrics: Blood Pressure (mmHg), Blood Glucose (mmol/L), Lipid Profile/Cholesterol (mmol/L), and Heart Rate (bpm).
 
 ### Outputs & Insights Generated
-* **Structured Parameters:** Standardized numerical key-value pairs representing vital signs[cite: 1, 4].
+* **Structured Parameters:** Standardized numerical key-value pairs representing vital signs.
 * **Plain-English Summary:** Simplified explanations of clinical report jargon.
 * **Pattern Analysis:** AI-identified trends (increasing, decreasing, or stable measurements) extracted directly from report comparisons.
 
