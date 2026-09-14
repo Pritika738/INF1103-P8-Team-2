@@ -33,12 +33,12 @@ Every input record passes through the `ai_manager` module to communicate with a 
 ### Outputs & Insights Generated
 * **Structured Parameters:** Standardized numerical key-value pairs representing vital signs[cite: 1, 4].
 * **Plain-English Summary:** Simplified explanations of clinical report jargon.
-* **Pattern Analysis:** AI-identified trends (increasing, decreasing, or stable measurements) extracted directly from report comparisons[cite: 1].
+* **Pattern Analysis:** AI-identified trends (increasing, decreasing, or stable measurements) extracted directly from report comparisons.
 
 ---## 4. Business Rules
 
 The `logic_manager` evaluates the AI's JSON output against the following strict decision-making rules:
 
 * **JSON Schema Validation (`ai_manager`):** The system validates that the AI output matches the expected JSON keys; malformed or non-JSON responses are rejected and safely retried without crashing the CLI application.
-* **Multi-Condition Trend Detection (`logic_manager`):** The logic layer compares newly extracted metrics against saved historical records. If a metric (e.g., Systolic Blood Pressure or Fasting Glucose) shows a continuous upward trend across $\ge 3$ consecutive check-ups AND exceeds standard safe thresholds, the system flags it as a "Notable Change" for the summary report[cite: 1, 4].
+* **Multi-Condition Trend Detection (`logic_manager`):** The logic layer compares newly extracted metrics against saved historical records. If a metric (e.g., Systolic Blood Pressure or Fasting Glucose) shows a continuous upward trend across $\ge 3$ consecutive check-ups AND exceeds standard safe thresholds, the system flags it as a "Notable Change" for the summary report.
 * **Diagnostic Safety Guardrails (`logic_manager`):** The system enforces a strict boundary prohibiting medical diagnoses or prescription advice. The logic manager inspects the AI text; if unauthorized prescriptive language is detected, it overrides the text and routes the item to a standardized prompt (e.g., *"Discuss this persistent trend with your physician"*).
