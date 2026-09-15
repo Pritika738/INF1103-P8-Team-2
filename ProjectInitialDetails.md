@@ -1,46 +1,33 @@
-```markdown
 # Project Initial Details
 
-## Repository Information
-* Repository URL: https://github.com/Pritika738/INF1103-P8-Team-2.git
-
 ### Problem Statement
-Individuals and health-conscious users often track vital signs (such as Blood Pressure, Blood Glucose, Cholesterol, and Heart Rate) across multiple scattered medical reports and check-ups over several years[cite: 1]. It is difficult for users to manually spot persistent long-term health trends, identify critical metric spikes, and determine what key information should be highlighted during an upcoming doctor appointment.
-
-Our application solves this by accepting scanned medical PDF reports, leveraging AI to convert clinical jargon into plain English, automatically extracting key vital metrics, detecting multi-condition longitudinal trends, and building a pre-consultation summary report.
+Patients often possess years of medical information but may find it difficult to understand and organise how their health has changed over time, identify unusual changes, and determine which information should be clarified with a healthcare professional. Moreover, existing record systems often present information as separate documents or isolated results, requiring patients to spend a lot of time and effort manually comparing their history.
 
 ### Target Users
-* **Health-Conscious Individuals:** Primary users who track personal vital signs and want clear visibility into how their health indicators change over time.
-* **Patients Preparing for Medical Visits:** Individuals who want a concise, organized summary of their vital trends and notable changes to review with their healthcare provider.
+The target users are individuals who have repeated health check-ups over several years and accumulated medical reports or those who regularly need to prepare information for healthcare appointments. Our application will organise the user’s medical history, analyse changes over time, and allow the user to generate a personalised summary for their next medical consultation, ensuring that difficult medical information is explained in plain language for the ease of comprehension.
 
---
+### User Inputs
+Account Details [Login] - Username, Password, Email
 
-## 2. User Inputs
+Past medical records - Scanned and uploaded into a database as a PDF/image with AI used to extract relevant health information (heart rate [BPM], blood pressure [systolic/diastolic], blood glucose)
 
-Users provide the following structured data to the application:
-* **Scanned PDF File Path:** Terminal input specifying the local file path of a scanned medical report (e.g., `C:/documents/report_2026.pdf`).
-* **CLI Navigation Commands:** Terminal menu selections to view timeline trends or generate consultation summary views.
+### Use of AI
+AI will be used to analyse the user's current and historical health measurements (heart rate, blood pressure, and blood glucose) from their scanned medical reports to identify trends and unusual changes over time.
 
---
+The AI will generate a structured JSON response identifying patterns such as increasing or decreasing trends, stable measurements, and significant changes. It can also highlight readings that may require the user's attention or further review by a healthcare professional.
 
-## 3. Use of AI
+These AI-generated results will then be displayed on the dashboard and the consultation-preparation report.
 
-### Utilization
-Every input record passes through the `ai_manager` module to communicate with a free-tier vision-capable AI API (e.g., Google Gemini Flash). The AI performs two critical functions:
-1. Translates complex clinical terms in the scanned report into plain-English explanations.
-2. Parses unstructured PDF report text into a strict, validated JSON object containing four key metrics: Blood Pressure (mmHg), Blood Glucose (mmol/L), Lipid Profile/Cholesterol (mmol/L), and Heart Rate (bpm).
+### Business Rules
+Input Validation (io_manager): The system will verify that uploaded medical documents are in a supported format and contain processable information before sending them for AI analysis.
 
-### Outputs & Insights Generated
-* **Structured Parameters:** Standardized numerical key-value pairs representing vital signs.
-* **Plain-English Summary:** Simplified explanations of clinical report jargon.
-* **Pattern Analysis:** AI-identified trends (increasing, decreasing, or stable measurements) extracted directly from report comparisons.
+Targeted Metric Validation (ai_manager): AI-generated output must follow a predefined JSON structure and may only contain the three health metrics tracked by the application (Blood Pressure, Blood Glucose, and Heart Rate). Missing, malformed, or unsupported values will be rejected or flagged for verification.
 
----## 4. Business Rules
+Trend Detection (logic_manager): New measurements will be compared with the user's historical records. Persistent increases, decreases, or significant changes across multiple readings will be flagged as notable trends for the user.
 
-The `logic_manager` evaluates the AI's JSON output against the following strict decision-making rules:
+Safety Rules (logic_manager): AI-generated outputs will not provide medical diagnoses, prescribe treatment, or recommend medication changes. Findings will instead be presented as informational observations and, where appropriate, users will be advised to discuss notable trends with a healthcare professional.
 
-* **JSON Schema Validation (`ai_manager`):** The system validates that the AI output matches the expected JSON keys; malformed or non-JSON responses are rejected and safely retried without crashing the CLI application.
-* **Multi-Condition Trend Detection (`logic_manager`):** The logic layer compares newly extracted metrics against saved historical records. If a metric (e.g., Systolic Blood Pressure or Fasting Glucose) shows a continuous upward trend across $\ge 3$ consecutive check-ups AND exceeds standard safe thresholds, the system flags it as a "Notable Change" for the summary report.
-* **Diagnostic Safety Guardrails (`logic_manager`):** The system enforces a strict boundary prohibiting medical diagnoses or prescription advice. The logic manager inspects the AI text; if unauthorized prescriptive language is detected, it overrides the text and routes the item to a standardized prompt (e.g., *"Discuss this persistent trend with your physician"*).
+Data Storage and Record Management (data_manager): Only AI-extracted health measurements that pass the application's validation rules will be stored in the user's health history. Each record will be associated with the relevant date to preserve chronological history. For the prototype, records will be stored using JSON/flat-file storage, while the data_manager will keep storage operations separate from the application's business logic.
 
---
+### GitHub Repository
+* Repository URL: https://github.com/Pritika738/INF1103-P8-Team-2.git
