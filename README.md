@@ -47,7 +47,7 @@ health_records.json
 ## Setup Instructions
 
 1. Ensure Python 3.11+ is installed.
-2. From the `inf1103_p8_team2/` directory, create a virtual environment (optional but recommended):
+2. From the `INF1103-P8-Team-2/` directory, create a virtual environment (optional but recommended):
    ```
    python -m venv venv
    venv\Scripts\activate   # Windows
@@ -61,7 +61,7 @@ health_records.json
 
 ## How to Run
 
-From inside the `inf1103_p8_team2/` directory:
+From inside the `INF1103-P8-Team-2/` directory:
 
 ```
 python main.py
