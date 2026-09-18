@@ -82,3 +82,5 @@ def select_findings_for_report(ai_findings):
     """
     # TODO: implement filtering/prioritisation rules.
     return list(ai_findings) if ai_findings else []
+
+#test
