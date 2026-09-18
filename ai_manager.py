@@ -8,11 +8,15 @@ Rules for this module:
 - No business/domain rules here (that belongs in logic_manager.py).
 - No print() or input() calls here - return values/errors to the caller.
 
-All functions below are placeholders. No real API integration has been
-implemented yet.
+call_ai_api() below now makes a real call to the Gemini API. Prompt
+content (build_prompt) and response handling (parse/validate) are still
+simple placeholders - they will be expanded once PDF/image ingestion and
+real trend-analysis prompts are implemented.
 """
 
 import json
+
+from google import genai
 
 from config import AI_MODEL_NAME, AI_MAX_RETRIES, get_api_key
 
@@ -36,25 +40,32 @@ def build_prompt(record):
 
 def call_ai_api(prompt):
     """
-    Placeholder for the future call to the AI API.
-
-    Intended to send `prompt` to the configured AI model (AI_MODEL_NAME)
-    using the API key from config.get_api_key(), and return the raw
-    response text.
+    Send `prompt` to the configured Gemini model (AI_MODEL_NAME) using
+    the API key from config.get_api_key(), and return the raw response
+    text.
 
     Args:
         prompt: str prompt to send to the AI.
 
     Returns:
-        A raw response string. Currently returns a placeholder response
-        and does not perform any real network call.
+        The model's response text on success. On failure (missing key,
+        network error, API error) returns a JSON string describing the
+        error instead of raising an exception, so callers never have to
+        wrap this in a try/except.
     """
-    # TODO: implement the real API call (e.g. via requests/SDK).
     api_key = get_api_key()
     if not api_key:
         return json.dumps({"error": "AI API key not configured."})
 
-    return json.dumps({"status": "not_implemented", "model": AI_MODEL_NAME})
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=AI_MODEL_NAME,
+            contents=prompt,
+        )
+        return response.text
+    except Exception as exc:
+        return json.dumps({"error": f"AI API call failed: {exc}"})
 
 
 def parse_ai_response(raw_response):

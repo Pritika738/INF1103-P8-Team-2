@@ -57,7 +57,7 @@ health_records.json
    ```
    pip install -r requirements.txt
    ```
-4. Copy `.env` and set a real API key in `AI_API_KEY` once AI integration is implemented (not required for the current starter features).
+4. Copy `.env.example` to `.env` and set a real key in `GEMINI_API_KEY` (get one from https://aistudio.google.com/apikey).
 
 ## How to Run
 
