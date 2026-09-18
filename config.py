@@ -19,15 +19,16 @@ load_dotenv()
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 HEALTH_RECORDS_FILE = os.path.join(DATA_DIR, "health_records.json")
 
-# --- AI configuration (placeholders) -----------------------------------
+# --- AI configuration ---------------------------------------------------
 
-# Name of the AI model to use. This is a placeholder for now and can be
-# changed once a specific provider/model is chosen (e.g. Google Gemini Flash).
-AI_MODEL_NAME = "placeholder-model"
+# Name of the Gemini model to use. "gemini-flash-latest" is an alias that
+# Google always points at their current Flash model, so we don't have to
+# update this string every time a newer Flash version is released.
+AI_MODEL_NAME = "gemini-2.5-flash"
 
 # Environment variable name that should hold the real API key.
 # The actual key value must never be committed to source control.
-API_KEY_ENV_VAR = "AI_API_KEY"
+API_KEY_ENV_VAR = "GEMINI_API_KEY"
 
 # Maximum number of times ai_manager should retry a failed AI call.
 AI_MAX_RETRIES = 3
