@@ -404,20 +404,6 @@ def ExtractFields(uploadedFile):
     )
 
     print("Analyzing report and generating patient dashboard data...")
-<<<<<<< HEAD
-    response = client.models.generate_content(
-        model=AI_MODEL_NAME,
-        contents=[
-            gemini_file, 
-            "Analyze this medical document. Extract the data fields, compile a patient-friendly summary, and flag all key actionable areas."
-        ],
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=ComprehensiveMedicalAnalysis,
-            temperature=0.1,
-        ),
-    )
-=======
     # For loop to keep prompting for response
     for attempt in range(1, AI_MAX_RETRIES + 1):
         try:
@@ -447,7 +433,6 @@ def ExtractFields(uploadedFile):
             else:
                 # Non-503 error (e.g. invalid key, schema error) -> raise immediately
                 raise e
->>>>>>> 137a05292c9385afa8bbf6806afb8fa089ed15ff
 
     # 5. Output the clean JSON results
     print("\n--- Extracted Data ---")
