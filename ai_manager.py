@@ -14,8 +14,13 @@ simple placeholders - they will be expanded once PDF/image ingestion and
 real trend-analysis prompts are implemented.
 """
 
-import json
+#pip install google-genai pydantic
 
+import json
+import os
+from typing import List, Optional
+from google.genai import types
+from pydantic import BaseModel, Field
 from google import genai
 
 from config import AI_MODEL_NAME, AI_MAX_RETRIES, get_api_key
@@ -125,3 +130,70 @@ def call_ai_with_retry(prompt, max_retries=AI_MAX_RETRIES):
             return parsed
 
     return None
+
+def Prompt(prompt:str):
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=prompt,
+    )
+
+    print(response.text)
+
+
+# 1. Database Mapping Schema
+class VitalsReading(BaseModel):
+    date: str = Field(description="The date of the report or reading formatted as YYYY-MM-DD")
+    blood_pressure: Optional[str] = Field(None, description="The blood pressure reading, e.g., '140/80'")
+    heart_rate: Optional[int] = Field(None, description="The pulse/heart rate value as an integer bpm")
+    blood_glucose: Optional[str] = Field(None, description="The blood glucose value if present, otherwise null")
+
+# 2. Key Action Item / Alert Schema
+class PatientAlert(BaseModel):
+    topic: str = Field(description="The category of the alert (e.g., Medication, Vitals, Follow-up)")
+    criticality: str = Field(description="Severity indicator: 'High', 'Medium', or 'Low'")
+    message: str = Field(description="Clear, actionable advice on what the patient needs to watch out for or do")
+
+# 3. Complete API Payload Structure
+class ComprehensiveMedicalAnalysis(BaseModel):
+    # For your database
+    database_vitals: VitalsReading = Field(description="Cleaned numeric and structured health metrics for DB storage")
+    
+    # For your user interface
+    patient_summary: str = Field(description="A friendly, clear 2-3 sentence overview of the medical report written directly to the patient.")
+    action_items: List[PatientAlert] = Field(description="Important flags, medications to continue, or next steps the user must remember.")
+
+
+def ExtractFields(fileName):
+
+    client = genai.Client(api_key=get_api_key[0])
+
+    print("Processing document...")
+
+    medical_file = client.files.upload(file=fileName) 
+
+    print("Analyzing report and generating patient dashboard data...")
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=[
+            medical_file, 
+            "Analyze this medical document. Extract the data fields, compile a patient-friendly summary, and flag all key actionable areas."
+        ],
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=ComprehensiveMedicalAnalysis,
+            temperature=0.1,
+        ),
+    )
+
+    # 5. Output the clean JSON results
+    print("\n--- Extracted Data ---")
+    print(response.text)
+    
+    # Optional: Clean up the file from Google's servers after processing
+    client.files.delete(name=medical_file.name)
+
+
+#main for testing
+if __name__ == "__main__":
+
+    ExtractFields()
