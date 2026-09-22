@@ -3,9 +3,6 @@ import json
 from ai_manager import ExtractFields 
 import io_manager
 
-import io_manager
-
-
 # --------------------------------------------------
 # PAGE CONFIGURATION
 # --------------------------------------------------
