@@ -1,7 +1,7 @@
 import streamlit as st
-
+import json
+from ai_manager import ExtractFields 
 import io_manager
-
 
 # --------------------------------------------------
 # PAGE CONFIGURATION
@@ -118,26 +118,37 @@ def show_upload():
     )
     st.caption("Supported: PDF, PNG, JPG/JPEG")
 
-    if uploaded_file is not None:
-        if not io_manager.is_supported_upload_type(uploaded_file.type):
-            st.error("Unsupported file type. Please upload a PDF, PNG, or JPG/JPEG file.")
-        else:
-            st.write(f"Selected: {uploaded_file.name}")
+    if uploaded_file is None:
+        return
 
-            if st.button("Process Report"):
-                with st.spinner("Processing report..."):
-                    result = io_manager.process_uploaded_report(
-                        uploaded_file.getvalue(), uploaded_file.type
-                    )
+    if not io_manager.is_supported_upload_type(uploaded_file.type):
+        st.error("Unsupported file type. Please upload a PDF, PNG, or JPG/JPEG file.")
+        return
 
-                if result is None:
-                    st.error(
-                        "We couldn't reliably extract data from this report. "
-                        "Please try again or upload a clearer copy."
-                    )
-                else:
-                    st.success("Report processed successfully.")
-                    st.json(result)
+
+    st.write(f"Selected: {uploaded_file.name}")
+
+    if st.button("Process Report"):
+        with st.spinner("Processing report..."):
+            try:
+                # sends uploaded file into the ai_manager.py 
+                extracted_json = ExtractFields(uploaded_file)
+
+                # Display result in Streamlit UI
+                st.success("Extraction Complete!")
+                st.json(extracted_json)
+
+                # Provide a Download Button for the JSON file (temporary)
+                json_string = json.dumps(extracted_json, indent=2)
+                st.download_button(
+                    label="💾 Download JSON File",
+                    data=json_string,
+                    file_name=f"extracted_{uploaded_file.name}.json",
+                    mime="application/json"
+                )
+            except Exception as e:
+                st.error(f"An error occurred during extraction: {e}")
+
 
     if st.button("Back to Dashboard"):
         st.session_state.page = "dashboard"
