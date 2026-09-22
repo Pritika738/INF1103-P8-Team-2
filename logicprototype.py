@@ -24,6 +24,7 @@ def evaluate_health_metrics(current_metrics: Dict[str, Any], historical_records:
     
     # Extract only the allowed metrics from the AI output (defaulting to 0 if missing)
     sys_bp = current_metrics.get("systolic_bp", 0)
+    dia_bp = current_metrics.get("diastolic_bp", 0)
     glucose = current_metrics.get("blood_glucose", 0.0)
     heart_rate = current_metrics.get("heart_rate", 0)
 
@@ -33,15 +34,26 @@ def evaluate_health_metrics(current_metrics: Dict[str, Any], historical_records:
         past_1 = historical_records[-1]
         past_2 = historical_records[-2]
 
-        # 1. Multi-Condition Rule for Blood Pressure
+        # 1a. Multi-Condition Rule for Systolic Blood Pressure
         past_1_sys = past_1.get("systolic_bp", 0)
         past_2_sys = past_2.get("systolic_bp", 0)
         
         if sys_bp > 130 and (sys_bp > past_1_sys > past_2_sys):
             findings.append({
-                "metric": "Blood Pressure",
+                "metric": "Systolic Blood Pressure",
                 "status": "FLAGGED",
                 "reason": f"Elevated systolic reading ({sys_bp} mmHg) with a persistent upward trend."
+            })
+
+        # 1b. Multi-Condition Rule for Diastolic Blood Pressure
+        past_1_dia = past_1.get("diastolic_bp", 0)
+        past_2_dia = past_2.get("diastolic_bp", 0)
+        
+        if dia_bp > 80 and (dia_bp > past_1_dia > past_2_dia):
+            findings.append({
+                "metric": "Diastolic Blood Pressure",
+                "status": "FLAGGED",
+                "reason": f"Elevated diastolic reading ({dia_bp} mmHg) with a persistent upward trend."
             })
 
         # 2. Multi-Condition Rule for Blood Glucose
@@ -222,14 +234,14 @@ if __name__ == "__main__":
         return {
             "extracted_metrics": {
                 "systolic_bp": 135,
-                "diastolic_bp": 82,
+                "diastolic_bp": 85,
                 "blood_glucose": 7.5,
                 "heart_rate": 85
             },
             "plain_english_summary": "Your latest blood test shows an increase."
         }
 
-    # 1. Historical records (Past_2 = 118, Past_1 = 125)
+    # 1. Historical records
     mock_history = [
         {"date": "2023-01-15", "systolic_bp": 118, "diastolic_bp": 75, "blood_glucose": 5.4, "heart_rate": 72},
         {"date": "2024-01-20", "systolic_bp": 125, "diastolic_bp": 78, "blood_glucose": 6.1, "heart_rate": 78}
