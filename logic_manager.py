@@ -15,12 +15,12 @@ def evaluate_health_metrics(current_metrics, historical_records):
     """
     Evaluates new metrics against historical data using a multi-condition rule.
     Strictly limited to evaluating Blood Pressure, Blood Glucose, and Heart Rate.
+    Checks for a persistent 3-step upward trend.
     """
     findings = []
     
-    # Extract only the 3 allowed metrics from the AI output (defaulting to 0 if missing)
+    # Extract only the allowed metrics from the AI output (defaulting to 0 if missing)
     sys_bp = current_metrics.get("systolic_bp", 0)
-    dia_bp = current_metrics.get("diastolic_bp", 0)
     glucose = current_metrics.get("blood_glucose", 0.0)
     heart_rate = current_metrics.get("heart_rate", 0)
 
@@ -66,6 +66,45 @@ def evaluate_health_metrics(current_metrics, historical_records):
     return findings
 
 
+def analyze_recent_changes(current_metrics, historical_records):
+    """
+    Compares the current metrics strictly against the most recent past record
+    to generate direct feedback on what has changed.
+    Restricted to Blood Pressure, Blood Glucose, and Heart Rate.
+    """
+    changes = []
+    
+    if not historical_records:
+        return changes # No past data to compare against
+        
+    last_record = historical_records[-1] # Get the most recent past visit
+    
+    # Strictly limited to your targeted metrics
+    metrics_to_track = [
+        "systolic_bp", 
+        "diastolic_bp", 
+        "blood_glucose", 
+        "heart_rate"
+    ]
+    
+    for metric in metrics_to_track:
+        current_val = current_metrics.get(metric)
+        past_val = last_record.get(metric)
+        
+        # Only compare if both records have valid, non-zero numbers
+        if current_val and past_val and current_val != past_val:
+            direction = "increased" if current_val > past_val else "decreased"
+            clean_name = metric.replace("_", " ").title()
+            
+            changes.append({
+                "metric": clean_name,
+                "status": "CHANGED",
+                "feedback": f"Your {clean_name} has {direction} from {past_val} to {current_val} since your last record."
+            })
+            
+    return changes
+
+
 def enforce_safety_guardrails(ai_explanation):
     """
     Evaluates the AI's plain-English text for prohibited diagnostic phrasing.
@@ -92,13 +131,18 @@ def process_ai_record(ai_json_output, historical_records):
     # 1. Ensure we only pull the extracted metrics dictionary
     extracted_metrics = ai_json_output.get("extracted_metrics", {})
     
-    # 2. Check for trends (Multi-condition logic)
-    trend_alerts = evaluate_health_metrics(extracted_metrics, historical_records)
+    # 2. Check for long-term trends (Multi-condition logic)
+    persistent_trends = evaluate_health_metrics(extracted_metrics, historical_records)
     
-    # 3. Enforce guardrails on the AI's summary
+    # 3. Check for immediate changes (Last Visit vs Today)
+    recent_changes = analyze_recent_changes(extracted_metrics, historical_records)
+    
+    # 4. Enforce guardrails on the AI's summary
     safe_summary = enforce_safety_guardrails(ai_json_output.get("plain_english_summary", ""))
     
-    # 4. Package the final validated outcome for the Data Manager
+    # 5. Package the final validated outcome for the Data Manager
+    has_flags = len(persistent_trends) > 0 or len(recent_changes) > 0
+    
     final_report = {
         "metrics": {
             "systolic_bp": extracted_metrics.get("systolic_bp"),
@@ -106,10 +150,11 @@ def process_ai_record(ai_json_output, historical_records):
             "blood_glucose": extracted_metrics.get("blood_glucose"),
             "heart_rate": extracted_metrics.get("heart_rate")
         },
-        "alerts": trend_alerts,
+        "persistent_trends": persistent_trends,
+        "recent_changes": recent_changes,
         "summary": safe_summary,
-        "requires_doctor_review": len(trend_alerts) > 0,
-        "decision": "FLAGGED" if len(trend_alerts) > 0 else "NORMAL"
+        "requires_doctor_review": has_flags,
+        "decision": "FLAGGED" if has_flags else "NORMAL"
     }
     
     return final_report
