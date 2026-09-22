@@ -1,5 +1,7 @@
 import streamlit as st
 
+import io_manager
+
 
 # --------------------------------------------------
 # PAGE CONFIGURATION
@@ -107,7 +109,35 @@ def show_dashboard():
 def show_upload():
     st.title("Add Medical Report")
 
-    st.write("Medical report upload will go here.")
+    st.subheader("Upload Medical Report")
+
+    uploaded_file = st.file_uploader(
+        "Upload Medical Report",
+        type=["pdf", "png", "jpg", "jpeg"],
+        label_visibility="collapsed",
+    )
+    st.caption("Supported: PDF, PNG, JPG/JPEG")
+
+    if uploaded_file is not None:
+        if not io_manager.is_supported_upload_type(uploaded_file.type):
+            st.error("Unsupported file type. Please upload a PDF, PNG, or JPG/JPEG file.")
+        else:
+            st.write(f"Selected: {uploaded_file.name}")
+
+            if st.button("Process Report"):
+                with st.spinner("Processing report..."):
+                    result = io_manager.process_uploaded_report(
+                        uploaded_file.getvalue(), uploaded_file.type
+                    )
+
+                if result is None:
+                    st.error(
+                        "We couldn't reliably extract data from this report. "
+                        "Please try again or upload a clearer copy."
+                    )
+                else:
+                    st.success("Report processed successfully.")
+                    st.json(result)
 
     if st.button("Back to Dashboard"):
         st.session_state.page = "dashboard"
