@@ -2,133 +2,74 @@
 logic_manager.py
 
 Responsible for business rules and domain logic only.
-
-Rules for this module:
-- No print() or input() calls here.
-- No network/AI calls here.
-- No file operations here - this module works purely on data passed
-  to it by other modules (e.g. lists/dicts of health records).
-
-All functions below are placeholders for future business logic and
-currently return simple, safe default values.
-"""
-
-
-def analyse_health_trends(records):
-    """
-    Placeholder for future long-term health trend analysis.
-
-    Intended to compare a metric (e.g. systolic blood pressure) across
-    multiple historical records and detect sustained upward/downward
-    trends.
-
-    Args:
-        records: list of health record dictionaries.
-
-    Returns:
-        A list of trend findings (currently empty - not yet implemented).
-    """
-    # TODO: implement multi-record trend detection.
-    return []
-
-
-def verify_medication_dosage(medication_name, dosage):
-    """
-    Placeholder for future medication dosage verification logic.
-
-    Intended to check a given dosage against known safe ranges for the
-    named medication.
-
-    Args:
-        medication_name: str
-        dosage: str or number representing the dosage.
-
-    Returns:
-        A dict describing the verification result (currently a stub).
-    """
-    # TODO: implement dosage range checks.
-    return {"medication_name": medication_name, "is_verified": False, "notes": "Not implemented yet."}
-
-
-def verify_allergy_information(allergies):
-    """
-    Placeholder for future allergy information verification logic.
-
-    Intended to cross-check reported allergies against known allergens
-    and flag potential conflicts with medications.
-
-    Args:
-        allergies: list of allergy strings.
-
-    Returns:
-        A list of verification findings (currently empty - not yet implemented).
-    """
-    # TODO: implement allergy cross-checking.
-    return []
-
-
-def select_findings_for_report(ai_findings):
-    """
-    Placeholder for future logic that decides which AI-generated
-    findings are important enough to include in the consultation
-    report.
-
-    Args:
-        ai_findings: list of findings produced by ai_manager.
-
-    Returns:
-        A list of findings selected for the report (currently returns
-        all findings unfiltered, as a safe default).
-    """
-    # TODO: implement filtering/prioritisation rules.
-    return list(ai_findings) if ai_findings else []
-
-#test
-
-"""
-logic_manager.py
-
-Responsible for business rules and domain logic only.
 Acts as the "Domain Brain" - applies clinical thresholds to AI-enriched records.
 
 Rules for this module:
-- No print() or input() calls here.
+- No print() or input() calls here (except in the isolated test block).
 - No network/AI calls here.
+- No file operations here.
 - Purely evaluates dictionaries/lists to flag, route, or reject data.
 """
 
-def detect_persistent_trends(new_metrics, historical_records):
+def evaluate_health_metrics(current_metrics, historical_records):
     """
     Evaluates new metrics against historical data using a multi-condition rule.
-    Outcome: Flags a 'Notable Change' if a metric breaches clinical thresholds 
-    AND shows a sustained upward trend across 3 consecutive records.
+    Strictly limited to evaluating Blood Pressure, Blood Glucose, and Heart Rate.
     """
     findings = []
     
-    # We need at least 2 past records + 1 new record to check a 3-step trend
-    if len(historical_records) >= 2:
-        # Extract the last two historical systolic values (assuming chronological order)
-        past_1 = historical_records[-1].get("systolic_bp", 0)
-        past_2 = historical_records[-2].get("systolic_bp", 0)
-        current = new_metrics.get("systolic_bp", 0)
+    # Extract only the 3 allowed metrics from the AI output (defaulting to 0 if missing)
+    sys_bp = current_metrics.get("systolic_bp", 0)
+    dia_bp = current_metrics.get("diastolic_bp", 0)
+    glucose = current_metrics.get("blood_glucose", 0.0)
+    heart_rate = current_metrics.get("heart_rate", 0)
 
-        # MULTI-CONDITION RULE: Is BP elevated (> 130) AND persistently rising?
-        if current > 130 and (current > past_1 > past_2):
+    # We need at least 2 past records to check a persistent 3-step trend
+    if len(historical_records) >= 2:
+        # Assuming historical_records are sorted chronologically
+        past_1 = historical_records[-1]
+        past_2 = historical_records[-2]
+
+        # 1. Multi-Condition Rule for Blood Pressure
+        past_1_sys = past_1.get("systolic_bp", 0)
+        past_2_sys = past_2.get("systolic_bp", 0)
+        
+        if sys_bp > 130 and (sys_bp > past_1_sys > past_2_sys):
             findings.append({
-                "metric": "Systolic Blood Pressure",
+                "metric": "Blood Pressure",
                 "status": "FLAGGED",
-                "reason": f"Elevated reading ({current} mmHg) with a persistent upward trend across 3 records."
+                "reason": f"Elevated systolic reading ({sys_bp} mmHg) with a persistent upward trend."
+            })
+
+        # 2. Multi-Condition Rule for Blood Glucose
+        past_1_gluc = past_1.get("blood_glucose", 0.0)
+        past_2_gluc = past_2.get("blood_glucose", 0.0)
+        
+        if glucose > 7.0 and (glucose > past_1_gluc > past_2_gluc):
+            findings.append({
+                "metric": "Blood Glucose",
+                "status": "FLAGGED",
+                "reason": f"Elevated fasting glucose ({glucose} mmol/L) with a persistent upward trend."
+            })
+
+        # 3. Multi-Condition Rule for Heart Rate
+        past_1_hr = past_1.get("heart_rate", 0)
+        past_2_hr = past_2.get("heart_rate", 0)
+        
+        if heart_rate > 100 and (heart_rate > past_1_hr > past_2_hr):
+            findings.append({
+                "metric": "Heart Rate",
+                "status": "FLAGGED",
+                "reason": f"Elevated resting heart rate ({heart_rate} bpm) with a persistent upward trend."
             })
             
-        # You can replicate this exact logic block for Fasting Glucose or Heart Rate
-        
     return findings
 
 
 def enforce_safety_guardrails(ai_explanation):
     """
     Evaluates the AI's plain-English text for prohibited diagnostic phrasing.
-    Outcome: Rejects and overrides prescriptive language to maintain the safety boundary.
+    Outcome: Rejects and overrides prescriptive language to maintain safety boundaries.
     """
     forbidden_words = ["diagnose", "disease", "prescribe", "treatment", "stop taking", "increase dose"]
     text_lower = ai_explanation.lower()
@@ -148,18 +89,57 @@ def process_ai_record(ai_json_output, historical_records):
     Takes the raw AI dictionary, applies all business rules, and returns a finalized 
     report dictionary ready for the data_manager to save.
     """
-    # 1. Check for trends (Multi-condition logic)
-    trend_alerts = detect_persistent_trends(ai_json_output.get("extracted_metrics", {}), historical_records)
+    # 1. Ensure we only pull the extracted metrics dictionary
+    extracted_metrics = ai_json_output.get("extracted_metrics", {})
     
-    # 2. Enforce guardrails on the AI's summary
+    # 2. Check for trends (Multi-condition logic)
+    trend_alerts = evaluate_health_metrics(extracted_metrics, historical_records)
+    
+    # 3. Enforce guardrails on the AI's summary
     safe_summary = enforce_safety_guardrails(ai_json_output.get("plain_english_summary", ""))
     
-    # 3. Package the final validated outcome
+    # 4. Package the final validated outcome for the Data Manager
     final_report = {
-        "metrics": ai_json_output.get("extracted_metrics", {}),
+        "metrics": {
+            "systolic_bp": extracted_metrics.get("systolic_bp"),
+            "diastolic_bp": extracted_metrics.get("diastolic_bp"),
+            "blood_glucose": extracted_metrics.get("blood_glucose"),
+            "heart_rate": extracted_metrics.get("heart_rate")
+        },
         "alerts": trend_alerts,
         "summary": safe_summary,
-        "requires_doctor_review": len(trend_alerts) > 0
+        "requires_doctor_review": len(trend_alerts) > 0,
+        "decision": "FLAGGED" if len(trend_alerts) > 0 else "NORMAL"
     }
     
     return final_report
+
+
+# ==========================================
+# DUMMY TEST SCRIPT (Local Execution Only)
+# ==========================================
+if __name__ == "__main__":
+    # Mock historical records loaded by Data Manager
+    mock_history = [
+        {"date": "2023-01-15", "systolic_bp": 118, "diastolic_bp": 75, "blood_glucose": 5.4, "heart_rate": 72},
+        {"date": "2024-01-20", "systolic_bp": 125, "diastolic_bp": 78, "blood_glucose": 6.1, "heart_rate": 78}
+    ]
+
+    # Mock output generated by AI Manager after scanning a PDF
+    mock_ai_output = {
+        "extracted_metrics": {
+            "systolic_bp": 135,
+            "diastolic_bp": 82,
+            "blood_glucose": 7.5,
+            "heart_rate": 85,
+            "unrelated_metric": 45  # The logic manager will ignore this
+        },
+        "plain_english_summary": "Your latest blood test shows an increase. I diagnose you with hypertension."
+    }
+
+    # Run the Logic Manager pipeline
+    print("--- Simulating Logic Manager Pipeline ---")
+    processed_result = process_ai_record(mock_ai_output, mock_history)
+    
+    import json
+    print(json.dumps(processed_result, indent=4))
