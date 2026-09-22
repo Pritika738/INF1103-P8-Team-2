@@ -1,0 +1,10 @@
+{
+  "extracted_metrics": {
+    "systolic_bp": 120,
+    "diastolic_bp": 67,
+    "blood_glucose": 6.7,
+    "heart_rate": 67,
+    "unrelated_metric": 67
+  },
+  "plain_english_summary": "Your latest blood test shows an increase. I diagnose you with hypertension."
+}
