@@ -26,15 +26,15 @@ belongs to logic_manager.py.
 #pip install google-genai pydantic
 
 import json
-import os
-from typing import List, Optional
+import time
+import streamlit as st
+
 from google.genai import types
-from pydantic import BaseModel, Field
+
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
-
-from config import AI_MODEL_NAME, AI_MAX_RETRIES, get_api_key
+from config import AI_MODEL_NAME, AI_MAX_RETRIES, BASE_DELAY, get_api_key, ComprehensiveMedicalAnalysis
 
 
 def build_prompt():
@@ -391,28 +391,6 @@ def call_ai_with_retry(file_bytes, mime_type, prompt, max_retries=AI_MAX_RETRIES
     return None
 
 
-# 1. Database Mapping Schema
-class VitalsReading(BaseModel):
-    date: str = Field(description="The date of the report or reading formatted as YYYY-MM-DD")
-    blood_pressure: Optional[str] = Field(None, description="The blood pressure reading, e.g., '140/80'")
-    heart_rate: Optional[int] = Field(None, description="The pulse/heart rate value as an integer bpm")
-    blood_glucose: Optional[str] = Field(None, description="The blood glucose value if present, otherwise null")
-
-# 2. Key Action Item / Alert Schema
-class PatientAlert(BaseModel):
-    topic: str = Field(description="The category of the alert (e.g., Medication, Vitals, Follow-up)")
-    criticality: str = Field(description="Severity indicator: 'High', 'Medium', or 'Low'")
-    message: str = Field(description="Clear, actionable advice on what the patient needs to watch out for or do")
-
-# 3. Complete API Payload Structure
-class ComprehensiveMedicalAnalysis(BaseModel):
-    # For your database
-    database_vitals: VitalsReading = Field(description="Cleaned numeric and structured health metrics for DB storage")
-    
-    # For your user interface
-    patient_summary: str = Field(description="A friendly, clear 2-3 sentence overview of the medical report written directly to the patient.")
-    action_items: List[PatientAlert] = Field(description="Important flags, medications to continue, or next steps the user must remember.")
-
 
 def ExtractFields(uploadedFile):
     print("Processing document...")
@@ -426,6 +404,7 @@ def ExtractFields(uploadedFile):
     )
 
     print("Analyzing report and generating patient dashboard data...")
+<<<<<<< HEAD
     response = client.models.generate_content(
         model=AI_MODEL_NAME,
         contents=[
@@ -438,6 +417,37 @@ def ExtractFields(uploadedFile):
             temperature=0.1,
         ),
     )
+=======
+    # For loop to keep prompting for response
+    for attempt in range(1, AI_MAX_RETRIES + 1):
+        try:
+            response = client.models.generate_content(
+                model=AI_MODEL_NAME,
+                contents=[
+                    gemini_file, 
+                    "Analyze this medical document. Extract the data fields, compile a patient-friendly summary, and flag all key actionable areas."
+                ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=ComprehensiveMedicalAnalysis,
+                    temperature=0.1,
+                ),
+            )
+        except Exception as e:
+            err_msg = str(e)
+            print(err_msg)
+            # Check for 503 / High Demand
+            if "503" in err_msg or "UNAVAILABLE" in err_msg:
+                if attempt < AI_MAX_RETRIES:
+                    st.warning(f"Model `{AI_MODEL_NAME}` is busy (503). Retrying in {BASE_DELAY}s (Attempt {attempt}/{AI_MAX_RETRIES})...")
+                    time.sleep(BASE_DELAY)
+                else:
+                    st.warning(f"Model `{AI_MODEL_NAME}` failed after {AI_MAX_RETRIES} attempts due to high demand.")
+                    extraction_error = e
+            else:
+                # Non-503 error (e.g. invalid key, schema error) -> raise immediately
+                raise e
+>>>>>>> 137a05292c9385afa8bbf6806afb8fa089ed15ff
 
     # 5. Output the clean JSON results
     print("\n--- Extracted Data ---")
