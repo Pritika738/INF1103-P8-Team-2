@@ -28,13 +28,13 @@ belongs to logic_manager.py.
 import json
 import time
 import streamlit as st
-from typing import List, Optional
+
 from google.genai import types
-from pydantic import BaseModel, Field
+
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
-from config import AI_MODEL_NAME, AI_MAX_RETRIES, BASE_DELAY, get_api_key
+from config import AI_MODEL_NAME, AI_MAX_RETRIES, BASE_DELAY, get_api_key, ComprehensiveMedicalAnalysis
 
 
 def build_prompt():
@@ -391,28 +391,6 @@ def call_ai_with_retry(file_bytes, mime_type, prompt, max_retries=AI_MAX_RETRIES
     return None
 
 
-# 1. Database Mapping Schema
-class VitalsReading(BaseModel):
-    date: str = Field(description="The date of the report or reading formatted as YYYY-MM-DD")
-    blood_pressure: Optional[str] = Field(None, description="The blood pressure reading, e.g., '140/80'")
-    heart_rate: Optional[int] = Field(None, description="The pulse/heart rate value as an integer bpm")
-    blood_glucose: Optional[str] = Field(None, description="The blood glucose value if present, otherwise null")
-
-# 2. Key Action Item / Alert Schema
-class PatientAlert(BaseModel):
-    topic: str = Field(description="The category of the alert (e.g., Medication, Vitals, Follow-up)")
-    criticality: str = Field(description="Severity indicator: 'High', 'Medium', or 'Low'")
-    message: str = Field(description="Clear, actionable advice on what the patient needs to watch out for or do")
-
-# 3. Complete API Payload Structure
-class ComprehensiveMedicalAnalysis(BaseModel):
-    # For your database
-    database_vitals: VitalsReading = Field(description="Cleaned numeric and structured health metrics for DB storage")
-    
-    # For your user interface
-    patient_summary: str = Field(description="A friendly, clear 2-3 sentence overview of the medical report written directly to the patient.")
-    action_items: List[PatientAlert] = Field(description="Important flags, medications to continue, or next steps the user must remember.")
-
 
 def ExtractFields(uploadedFile):
     print("Processing document...")
@@ -443,13 +421,12 @@ def ExtractFields(uploadedFile):
             )
         except Exception as e:
             err_msg = str(e)
-            
+            print(err_msg)
             # Check for 503 / High Demand
             if "503" in err_msg or "UNAVAILABLE" in err_msg:
                 if attempt < AI_MAX_RETRIES:
-                    wait_time = BASE_DELAY * (2 ** (attempt - 1)) # Exponential backoff: 2s, 4s, 8s
-                    st.warning(f"Model `{AI_MODEL_NAME}` is busy (503). Retrying in {wait_time}s (Attempt {attempt}/{AI_MAX_RETRIES})...")
-                    time.sleep(wait_time)
+                    st.warning(f"Model `{AI_MODEL_NAME}` is busy (503). Retrying in {BASE_DELAY}s (Attempt {attempt}/{AI_MAX_RETRIES})...")
+                    time.sleep(BASE_DELAY)
                 else:
                     st.warning(f"Model `{AI_MODEL_NAME}` failed after {AI_MAX_RETRIES} attempts due to high demand.")
                     extraction_error = e
