@@ -44,6 +44,14 @@ BASE_DELAY = 5
 # --- Application constants ---------------------------------------------
 
 # Health measurements currently planned for the system.
+SUPPORTED_METRICS = [
+    "blood_pressure_systolic",
+    "blood_pressure_diastolic",
+    "heart_rate",
+    "blood_glucose",
+    "cholesterol",
+]
+
 # 1. Database Mapping Schema
 class VitalsReading(BaseModel):
     date: str = Field(description="The date of the report or reading formatted as YYYY-MM-DD")
