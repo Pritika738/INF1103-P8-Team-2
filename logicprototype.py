@@ -14,6 +14,18 @@ Rules for this module:
 from typing import Dict, List, Any
 
 
+# Clinical tolerance buffers used only by analyze_recent_changes().
+# A day-to-day delta within these bounds is treated as normal fluctuation
+# and is NOT reported as a "CHANGED" metric. This has no effect on
+# evaluate_health_metrics(), which keeps using its own hard thresholds.
+RECENT_CHANGE_TOLERANCES: Dict[str, float] = {
+    "systolic_bp": 5,
+    "diastolic_bp": 4,
+    "blood_glucose": 0.5,
+    "heart_rate": 5,
+}
+
+
 def evaluate_health_metrics(current_metrics: Dict[str, Any], historical_records: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     """
     Evaluates new metrics against historical data using a multi-condition rule.
@@ -86,6 +98,9 @@ def analyze_recent_changes(current_metrics: Dict[str, Any], historical_records: 
     Compares the current metrics strictly against the most recent past record
     to generate direct feedback on what has changed.
     Restricted to Blood Pressure, Blood Glucose, and Heart Rate.
+
+    Minor day-to-day fluctuations within RECENT_CHANGE_TOLERANCES are treated
+    as stable and are not reported here.
     """
     changes = []
     
@@ -108,6 +123,13 @@ def analyze_recent_changes(current_metrics: Dict[str, Any], historical_records: 
         
         # Only compare if both records have valid, non-zero numbers
         if current_val and past_val and current_val != past_val:
+            delta = current_val - past_val
+            tolerance = RECENT_CHANGE_TOLERANCES.get(metric, 0)
+
+            # Within the clinical tolerance buffer -> normal fluctuation, skip it
+            if abs(delta) <= tolerance:
+                continue
+
             direction = "increased" if current_val > past_val else "decreased"
             clean_name = metric.replace("_", " ").title()
             
