@@ -427,7 +427,7 @@ def ExtractFields(uploadedFile):
 
     print("Analyzing report and generating patient dashboard data...")
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        model=AI_MODEL_NAME,
         contents=[
             gemini_file, 
             "Analyze this medical document. Extract the data fields, compile a patient-friendly summary, and flag all key actionable areas."

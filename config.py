@@ -21,10 +21,13 @@ HEALTH_RECORDS_FILE = os.path.join(DATA_DIR, "health_records.json")
 
 # --- AI configuration ---------------------------------------------------
 
-# Name of the Gemini model to use. "gemini-flash-latest" is an alias that
-# Google always points at their current Flash model, so we don't have to
-# update this string every time a newer Flash version is released.
-AI_MODEL_NAME = "gemini-2.5-flash"
+# Name of the Gemini model to use. "gemini-2.5-flash" was retired for new
+# requests (Google's API now returns 404 for it). Verified working and
+# correctly extracting values from a test report as of 2026-09-22:
+# gemini-3.6-flash. "gemini-3.1-flash-image" (tried previously) is an
+# image-generation model, not a fit for text extraction, and its own
+# free-tier quota is currently exhausted anyway.
+AI_MODEL_NAME = "gemini-3.6-flash"
 
 # The actual key value must never be committed to source control.
 API_KEY_ENV_VAR = "GEMINI_API_KEY"
@@ -52,4 +55,4 @@ def get_api_key():
     responsible for handling a missing key (e.g. showing a message to
     the user) - this function only reads the value.
     """
-    return os.environ.get("API_KEY_ENV_VAR")
+    return os.environ.get(API_KEY_ENV_VAR)
