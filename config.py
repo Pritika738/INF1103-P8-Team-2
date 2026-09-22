@@ -26,7 +26,6 @@ HEALTH_RECORDS_FILE = os.path.join(DATA_DIR, "health_records.json")
 # update this string every time a newer Flash version is released.
 AI_MODEL_NAME = "gemini-2.5-flash"
 
-# Environment variable name that should hold the real API key.
 # The actual key value must never be committed to source control.
 API_KEY_ENV_VAR = "GEMINI_API_KEY"
 
