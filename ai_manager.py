@@ -26,15 +26,15 @@ belongs to logic_manager.py.
 #pip install google-genai pydantic
 
 import json
-import os
+import time
+import streamlit as st
 from typing import List, Optional
 from google.genai import types
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
-
-from config import AI_MODEL_NAME, AI_MAX_RETRIES, get_api_key
+from config import AI_MODEL_NAME, AI_MAX_RETRIES, BASE_DELAY, get_api_key
 
 
 def build_prompt():
@@ -426,18 +426,36 @@ def ExtractFields(uploadedFile):
     )
 
     print("Analyzing report and generating patient dashboard data...")
-    response = client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=[
-            gemini_file, 
-            "Analyze this medical document. Extract the data fields, compile a patient-friendly summary, and flag all key actionable areas."
-        ],
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=ComprehensiveMedicalAnalysis,
-            temperature=0.1,
-        ),
-    )
+    # For loop to keep prompting for response
+    for attempt in range(1, AI_MAX_RETRIES + 1):
+        try:
+            response = client.models.generate_content(
+                model=AI_MODEL_NAME,
+                contents=[
+                    gemini_file, 
+                    "Analyze this medical document. Extract the data fields, compile a patient-friendly summary, and flag all key actionable areas."
+                ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=ComprehensiveMedicalAnalysis,
+                    temperature=0.1,
+                ),
+            )
+        except Exception as e:
+            err_msg = str(e)
+            
+            # Check for 503 / High Demand
+            if "503" in err_msg or "UNAVAILABLE" in err_msg:
+                if attempt < AI_MAX_RETRIES:
+                    wait_time = BASE_DELAY * (2 ** (attempt - 1)) # Exponential backoff: 2s, 4s, 8s
+                    st.warning(f"Model `{AI_MODEL_NAME}` is busy (503). Retrying in {wait_time}s (Attempt {attempt}/{AI_MAX_RETRIES})...")
+                    time.sleep(wait_time)
+                else:
+                    st.warning(f"Model `{AI_MODEL_NAME}` failed after {AI_MAX_RETRIES} attempts due to high demand.")
+                    extraction_error = e
+            else:
+                # Non-503 error (e.g. invalid key, schema error) -> raise immediately
+                raise e
 
     # 5. Output the clean JSON results
     print("\n--- Extracted Data ---")

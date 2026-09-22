@@ -30,7 +30,9 @@ AI_MODEL_NAME = "gemini-2.5-flash"
 API_KEY_ENV_VAR = "GEMINI_API_KEY"
 
 # Maximum number of times ai_manager should retry a failed AI call.
-AI_MAX_RETRIES = 3
+AI_MAX_RETRIES = 10
+# Base wait time in between each retry 
+BASE_DELAY = 2 
 
 # --- Application constants ---------------------------------------------
 
@@ -52,4 +54,4 @@ def get_api_key():
     responsible for handling a missing key (e.g. showing a message to
     the user) - this function only reads the value.
     """
-    return os.environ.get("API_KEY_ENV_VAR")
+    return os.environ.get(API_KEY_ENV_VAR)
