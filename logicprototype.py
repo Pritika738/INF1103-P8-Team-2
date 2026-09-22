@@ -255,18 +255,18 @@ if __name__ == "__main__":
         # Fallback dummy data if the mock file doesn't exist yet
         return {
             "extracted_metrics": {
-                "systolic_bp": 135,
-                "diastolic_bp": 85,
-                "blood_glucose": 7.5,
-                "heart_rate": 85
+                "systolic_bp": 128,
+                "diastolic_bp": 76,
+                "blood_glucose": 6.7,
+                "heart_rate": 95
             },
             "plain_english_summary": "Your latest blood test shows an increase."
         }
 
     # 1. Historical records
     mock_history = [
-        {"date": "2023-01-15", "systolic_bp": 118, "diastolic_bp": 75, "blood_glucose": 5.4, "heart_rate": 72},
-        {"date": "2024-01-20", "systolic_bp": 125, "diastolic_bp": 78, "blood_glucose": 6.1, "heart_rate": 78}
+        {"date": "2023-01-15", "systolic_bp": 129, "diastolic_bp": 79, "blood_glucose": 6.8, "heart_rate": 94},
+        {"date": "2024-01-20", "systolic_bp": 128, "diastolic_bp": 80, "blood_glucose": 7.0, "heart_rate": 96}
     ]
 
     # 2. Load the current AI output from file
