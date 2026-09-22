@@ -52,4 +52,4 @@ def get_api_key():
     responsible for handling a missing key (e.g. showing a message to
     the user) - this function only reads the value.
     """
-    return os.environ.get(API_KEY_ENV_VAR)
+    return os.environ.get("API_KEY_ENV_VAR")
