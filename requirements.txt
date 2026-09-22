@@ -1,2 +1,4 @@
 python-dotenv
 google-genai
+pytest
+streamlit

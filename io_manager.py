@@ -4,9 +4,20 @@ io_manager.py
 All user-facing input() and print() operations live in this module.
 Other modules should never call input()/print() directly - they should
 return data/results, and io_manager displays/collects it.
+
+process_uploaded_report() is the one exception to "no other modules" -
+it is the I/O-layer function that a GUI/CLI screen calls to hand an
+uploaded medical report to ai_manager.py. It contains no AI prompt
+construction, no direct Gemini calls, and no JSON parsing/validation
+itself - all of that stays in ai_manager.py.
 """
 
+import ai_manager
 from config import SUPPORTED_METRICS
+
+# MIME types this application currently accepts for medical report
+# uploads (see GUI_PLAN.md: "Supported Upload Formats").
+SUPPORTED_UPLOAD_MIME_TYPES = {"application/pdf", "image/png", "image/jpeg"}
 
 
 # --- Menu display --------------------------------------------------------
@@ -78,6 +89,43 @@ def show_health_records(records):
                 print(f"  {metric}: {record[metric]}")
         if record.get("date"):
             print(f"  date: {record['date']}")
+
+
+# --- Medical report upload handling -----------------------------------
+
+def is_supported_upload_type(mime_type):
+    """
+    Check whether `mime_type` is one of the medical report formats this
+    application accepts (PDF, PNG, JPG/JPEG).
+
+    Args:
+        mime_type: str - a file's MIME type, e.g. "application/pdf".
+
+    Returns:
+        True if the type is supported, False otherwise.
+    """
+    return mime_type in SUPPORTED_UPLOAD_MIME_TYPES
+
+
+def process_uploaded_report(file_bytes, mime_type):
+    """
+    Run an uploaded medical report through the AI Manager pipeline.
+
+    Builds the extraction prompt and sends the file to Gemini via
+    ai_manager, retrying and validating internally, and returns
+    whatever ai_manager decides is trustworthy (or not).
+
+    Args:
+        file_bytes: bytes - the raw content of the uploaded file.
+        mime_type: str - the file's MIME type, e.g. "application/pdf".
+
+    Returns:
+        A validated response dict (see ai_manager.validate_schema())
+        on success, or None if ai_manager could not produce a
+        trustworthy result after retrying.
+    """
+    prompt = ai_manager.build_prompt()
+    return ai_manager.call_ai_with_retry(file_bytes, mime_type, prompt)
 
 
 # --- Reusable input-validation helpers -------------------------------------

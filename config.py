@@ -28,7 +28,7 @@ AI_MODEL_NAME = "gemini-2.5-flash"
 
 # Environment variable name that should hold the real API key.
 # The actual key value must never be committed to source control.
-API_KEY_ENV_VAR = ["AQ.Ab8RN6IIsCuV6bv11ePM0EicpMIdvQxZ-CzBbtPWn_TTVGY40g", "Sheng You API"]
+API_KEY_ENV_VAR = "GEMINI_API_KEY"
 
 # Maximum number of times ai_manager should retry a failed AI call.
 AI_MAX_RETRIES = 3
@@ -45,7 +45,7 @@ SUPPORTED_METRICS = [
 ]
 
 
-def get_api_key(who):
+def get_api_key():
     """
     Read the AI API key from the environment.
 
@@ -53,4 +53,4 @@ def get_api_key(who):
     responsible for handling a missing key (e.g. showing a message to
     the user) - this function only reads the value.
     """
-    return os.environ.get(API_KEY_ENV_VAR[who])
+    return os.environ.get(API_KEY_ENV_VAR)

@@ -1,4 +1,7 @@
 import streamlit as st
+import json
+from ai_manager import ExtractFields 
+import io_manager
 
 
 # --------------------------------------------------
@@ -107,7 +110,46 @@ def show_dashboard():
 def show_upload():
     st.title("Add Medical Report")
 
-    st.write("Medical report upload will go here.")
+    st.subheader("Upload Medical Report")
+
+    uploaded_file = st.file_uploader(
+        "Upload Medical Report",
+        type=["pdf", "png", "jpg", "jpeg"],
+        label_visibility="collapsed",
+    )
+    st.caption("Supported: PDF, PNG, JPG/JPEG")
+
+    if uploaded_file is None:
+        return
+
+    if not io_manager.is_supported_upload_type(uploaded_file.type):
+        st.error("Unsupported file type. Please upload a PDF, PNG, or JPG/JPEG file.")
+        return
+
+
+    st.write(f"Selected: {uploaded_file.name}")
+
+    if st.button("Process Report"):
+        with st.spinner("Processing report..."):
+            try:
+                # sends uploaded file into the ai_manager.py 
+                extracted_json = ExtractFields(uploaded_file)
+
+                # Display result in Streamlit UI
+                st.success("Extraction Complete!")
+                st.json(extracted_json)
+
+                # Provide a Download Button for the JSON file (temporary)
+                json_string = json.dumps(extracted_json, indent=2)
+                st.download_button(
+                    label="💾 Download JSON File",
+                    data=json_string,
+                    file_name=f"extracted_{uploaded_file.name}.json",
+                    mime="application/json"
+                )
+            except Exception as e:
+                st.error(f"An error occurred during extraction: {e}")
+
 
     if st.button("Back to Dashboard"):
         st.session_state.page = "dashboard"
