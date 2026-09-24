@@ -41,11 +41,6 @@ PROMPT_TEMPLATES: Dict[str, str] = {
         "Extract the following health metrics if they are clearly visible in the report: heart rate, blood pressure (systolic and diastolic), and blood glucose.\n\n"
         "Respond with ONLY valid JSON and nothing else - no markdown formatting, no code fences (```), no explanation, and no text before or after the JSON.\n\n"
         "The JSON must contain exactly these fields, with no additional fields:\n"
-        "{\n"
-        '  "heart_rate": <number, or null if not visible>,\n'
-        '  "blood_pressure": {"systolic": <number, or null>, "diastolic": <number, or null>},\n'
-        '  "blood_glucose": <number, or null if not visible>\n'
-        "}\n\n"
         'If no blood pressure reading is visible at all, set "blood_pressure" itself to null instead of guessing either value.\n\n'
         "Rules you must follow:\n"
         "- Do not diagnose any medical condition.\n"
@@ -55,8 +50,10 @@ PROMPT_TEMPLATES: Dict[str, str] = {
     ),
     
     "extract": (
-        "Analyze this medical document.\n"
-        "Extract the data fields, compile a patient-friendly summary, and flag all key actionable areas.\n"
+        "Analyze this medical document and do the following.\n" 
+        "- Extract the data fields. \n" 
+        "- Summarise the medial report and compile a patient-friendly summary.\n"
+        "- Flag all key actionable areas.\n"
         "- Do not diagnose any medical condition.\n"
         "- Do not recommend or suggest any treatment, medication, or dosage.\n"
         "- Do not invent, estimate, or guess a value that is not clearly present in the report - use null instead.\n"
@@ -431,7 +428,7 @@ def ExtractFields(uploadedFile):
                 model=AI_MODEL_NAME,
                 contents=[
                     gemini_file, 
-                    build_prompt("extract")
+                    build_prompt("vital")
                 ],
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
