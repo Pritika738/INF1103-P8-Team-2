@@ -16,7 +16,7 @@ st.set_page_config(
     page_title="VitalTrack - Health History and Consultation Prep",
     page_icon="🩺",
     layout="wide",
-    initial_sidebar_state="locked",
+    initial_sidebar_state="expanded",
 )
 
 def inject_css():
