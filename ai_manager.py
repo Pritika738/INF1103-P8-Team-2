@@ -35,6 +35,55 @@ from google.genai import errors as genai_errors
 from google.genai import types
 from config import AI_MODEL_NAME, AI_MAX_RETRIES, BASE_DELAY, get_api_key
 
+
+def build_prompt():
+    """
+    Build the instruction text sent to Gemini alongside an uploaded
+    medical report (PDF or image).
+
+    The prompt asks Gemini to extract heart rate, blood pressure
+    (systolic/diastolic), and blood glucose, and to reply with ONLY a
+    JSON object in an exact, fixed structure - no markdown, no
+    explanation, no extra fields - so that parse_response() and
+    validate_schema() can reliably check what comes back. It also
+    forbids diagnosing conditions, recommending treatment, or inventing
+    values that are not actually present in the report.
+
+    Returns:
+        A prompt string ready to be sent to the AI model together with
+        the report file.
+    """
+    return (
+        "You are a data extraction assistant. You will be given a "
+        "medical report as a PDF or image.\n\n"
+        "Extract the following health metrics if they are clearly "
+        "visible in the report: heart rate, blood pressure (systolic "
+        "and diastolic), and blood glucose.\n\n"
+        "Respond with ONLY valid JSON and nothing else - no markdown "
+        "formatting, no code fences (```), no explanation, and no text "
+        "before or after the JSON.\n\n"
+        "The JSON must contain exactly these fields, with no additional "
+        "fields:\n"
+        "{\n"
+        '  "heart_rate": <number, or null if not visible>,\n'
+        '  "blood_pressure": {"systolic": <number, or null>, '
+        '"diastolic": <number, or null>},\n'
+        '  "blood_glucose": <number, or null if not visible>\n'
+        "}\n\n"
+        'If no blood pressure reading is visible at all, set '
+        '"blood_pressure" itself to null instead of guessing either '
+        "value.\n\n"
+        "Rules you must follow:\n"
+        "- Do not diagnose any medical condition.\n"
+        "- Do not recommend or suggest any treatment, medication, or "
+        "dosage.\n"
+        "- Do not invent, estimate, or guess a value that is not clearly "
+        "present in the report - use null instead.\n"
+        "- Do not include any field other than heart_rate, "
+        "blood_pressure, and blood_glucose."
+    )
+
+
 class AIManager:
     def __init__(self, client: genai.Client, model_name: str):
         self.client = genai.Client(api_key=get_api_key())
