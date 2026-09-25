@@ -30,11 +30,10 @@ import time
 import streamlit as st
 
 from google.genai import types
-
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
-from config import AI_MODEL_NAME, AI_MAX_RETRIES, BASE_DELAY, get_api_key, ComprehensiveMedicalAnalysis
+from config import AI_MODEL_NAME, AI_MAX_RETRIES, BASE_DELAY, get_api_key
 
 
 def build_prompt():
@@ -84,6 +83,65 @@ def build_prompt():
         "blood_pressure, and blood_glucose."
     )
 
+
+class AIManager:
+    def __init__(self, client: genai.Client, model_name: str):
+        self.client = genai.Client(api_key=get_api_key())
+        self.model_name = AI_MODEL_NAME
+
+    def ExtractFields(self, uploadedFile,prompt,schema):        
+
+        gemini_file = self.client.files.upload(
+            file=uploadedFile,
+            config=types.UploadFileConfig(mime_type=uploadedFile.type)
+        )
+
+        print("Analyzing report and extracting data...")
+
+        # For loop to keep prompting for response
+        for attempt in range(1, AI_MAX_RETRIES + 1):
+            try:
+                response = self.client.models.generate_content(
+                    model=AI_MODEL_NAME,
+                    contents=[
+                        uploadedFile, 
+                        prompt
+                    ],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=schema,
+                        temperature=0.1,
+                    ),
+                )
+
+                parsed = parse_response(response.text)
+
+                '''if not validate_schema(parsed):
+                    continue
+        
+                if not verify_source(uploadedFile, uploadedFile.type, parsed):
+                    continue'''
+
+                break # exits on successful response
+
+            except Exception as e:
+                err_msg = str(e)
+                print(err_msg)
+                # Check for 503 / High Demand
+                if "503" in err_msg or "UNAVAILABLE" in err_msg:
+                    if attempt < AI_MAX_RETRIES:
+                        st.warning(f"Model `{AI_MODEL_NAME}` is busy (503). Retrying in {BASE_DELAY}s (Attempt {attempt}/{AI_MAX_RETRIES})...")
+                        time.sleep(BASE_DELAY)
+                    else:
+                        st.warning(f"Model `{AI_MODEL_NAME}` failed after {AI_MAX_RETRIES} attempts due to high demand.")
+                else:
+                    # Non-503 error (e.g. invalid key, schema error) -> raise immediately
+                    raise e
+
+        # Clean up uploaded file from Gemini storage
+        self.client.files.delete(name=gemini_file.name)
+        
+        return parsed
 
 def call_ai(file_bytes, mime_type, prompt):
     """
@@ -392,57 +450,7 @@ def call_ai_with_retry(file_bytes, mime_type, prompt, max_retries=AI_MAX_RETRIES
 
 
 
-def ExtractFields(uploadedFile):
-    print("Processing document...")
 
-    client = genai.Client(api_key=get_api_key())
-
-
-    gemini_file = client.files.upload(
-        file=uploadedFile,
-        config=types.UploadFileConfig(mime_type=uploadedFile.type)
-    )
-
-    print("Analyzing report and generating patient dashboard data...")
-    # For loop to keep prompting for response
-    for attempt in range(1, AI_MAX_RETRIES + 1):
-        try:
-            response = client.models.generate_content(
-                model=AI_MODEL_NAME,
-                contents=[
-                    gemini_file, 
-                    "Analyze this medical document. Extract the data fields, compile a patient-friendly summary, and flag all key actionable areas."
-                ],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=ComprehensiveMedicalAnalysis,
-                    temperature=0.1,
-                ),
-            )
-        except Exception as e:
-            err_msg = str(e)
-            print(err_msg)
-            # Check for 503 / High Demand
-            if "503" in err_msg or "UNAVAILABLE" in err_msg:
-                if attempt < AI_MAX_RETRIES:
-                    st.warning(f"Model `{AI_MODEL_NAME}` is busy (503). Retrying in {BASE_DELAY}s (Attempt {attempt}/{AI_MAX_RETRIES})...")
-                    time.sleep(BASE_DELAY)
-                else:
-                    st.warning(f"Model `{AI_MODEL_NAME}` failed after {AI_MAX_RETRIES} attempts due to high demand.")
-                    extraction_error = e
-            else:
-                # Non-503 error (e.g. invalid key, schema error) -> raise immediately
-                raise e
-
-    # 5. Output the clean JSON results
-    print("\n--- Extracted Data ---")
-    print(response.text)
-    extracted_json = json.loads(response.text)
-    
-    # Clean up uploaded file from Gemini storage
-    client.files.delete(name=gemini_file.name)
-    
-    return extracted_json
 
 #main for testing
 if __name__ == "__main__":
