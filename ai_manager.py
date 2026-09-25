@@ -28,78 +28,71 @@ belongs to logic_manager.py.
 import json
 import time
 import streamlit as st
-from typing import Dict, Optional
+
 from google.genai import types
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
-from config import AI_MODEL_NAME, AI_MAX_RETRIES, BASE_DELAY, get_api_key, ComprehensiveMedicalAnalysis
+from config import AI_MODEL_NAME, AI_MAX_RETRIES, BASE_DELAY, get_api_key
 
-PROMPT_TEMPLATES: Dict[str, str] = {
-    "vital": (
-        "You are a data extraction assistant. You will be given a medical report as a PDF or image.\n\n"
-        "Extract the following health metrics if they are clearly visible in the report: heart rate, blood pressure (systolic and diastolic), and blood glucose.\n\n"
-        "Respond with ONLY valid JSON and nothing else - no markdown formatting, no code fences (```), no explanation, and no text before or after the JSON.\n\n"
-        "The JSON must contain exactly these fields, with no additional fields:\n"
-        'If no blood pressure reading is visible at all, set "blood_pressure" itself to null instead of guessing either value.\n\n'
-        "Rules you must follow:\n"
-        "- Do not diagnose any medical condition.\n"
-        "- Do not recommend or suggest any treatment, medication, or dosage.\n"
-        "- Do not invent, estimate, or guess a value that is not clearly present in the report - use null instead.\n"
-        "- Do not include any field other than heart_rate, blood_pressure, and blood_glucose."
-    ),
-    
-    "extract": (
-        "Analyze this medical document and do the following.\n" 
-        "- Extract the data fields. \n" 
-        "- Summarise the medial report and compile a patient-friendly summary.\n"
-        "- Flag all key actionable areas.\n"
-        "- Do not diagnose any medical condition.\n"
-        "- Do not recommend or suggest any treatment, medication, or dosage.\n"
-        "- Do not invent, estimate, or guess a value that is not clearly present in the report - use null instead.\n"
-        
-    ),
-    
-    "summary": (
-        "You are a document processing assistant.\n\n"
-        "Extract general administrative information from the medical report.\n\n"
-        "Respond with ONLY valid JSON strictly matching this structure:\n"
-        "{\n"
-        '  "provider_name": <string or null>,\n'
-        '  "report_date": <string YYYY-MM-DD or null>,\n'
-        '  "document_type": <string or null>\n'
-        "}\n\n"
-        "Rules:\n"
-        "- Do not invent details; use null if not visible."
-    )
-}
+class AIManager:
+    def __init__(self, client: genai.Client, model_name: str):
+        self.client = genai.Client(api_key=get_api_key())
+        self.model_name = AI_MODEL_NAME
 
-def build_prompt(prompt_type: str):
-    """
-    Build the instruction text sent to Gemini alongside an uploaded
-    medical report (PDF or image).
+    def ExtractFields(self, uploadedFile,prompt,schema):        
 
-    The prompt asks Gemini to extract heart rate, blood pressure
-    (systolic/diastolic), and blood glucose, and to reply with ONLY a
-    JSON object in an exact, fixed structure - no markdown, no
-    explanation, no extra fields - so that parse_response() and
-    validate_schema() can reliably check what comes back. It also
-    forbids diagnosing conditions, recommending treatment, or inventing
-    values that are not actually present in the report.
-
-    Returns:
-        A prompt string ready to be sent to the AI model together with
-        the report file.
-    """
-
-    if prompt_type not in PROMPT_TEMPLATES:
-        valid_keys = ", ".join(f"'{k}'" for k in PROMPT_TEMPLATES.keys())
-        raise ValueError(
-            f"Invalid prompt_type '{prompt_type}'. Available options: {valid_keys}"
+        gemini_file = self.client.files.upload(
+            file=uploadedFile,
+            config=types.UploadFileConfig(mime_type=uploadedFile.type)
         )
 
-    return PROMPT_TEMPLATES[prompt_type]
+        print("Analyzing report and extracting data...")
 
+        # For loop to keep prompting for response
+        for attempt in range(1, AI_MAX_RETRIES + 1):
+            try:
+                response = self.client.models.generate_content(
+                    model=AI_MODEL_NAME,
+                    contents=[
+                        uploadedFile, 
+                        prompt
+                    ],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=schema,
+                        temperature=0.1,
+                    ),
+                )
+
+                parsed = parse_response(response.text)
+
+                '''if not validate_schema(parsed):
+                    continue
+        
+                if not verify_source(uploadedFile, uploadedFile.type, parsed):
+                    continue'''
+
+                break # exits on successful response
+
+            except Exception as e:
+                err_msg = str(e)
+                print(err_msg)
+                # Check for 503 / High Demand
+                if "503" in err_msg or "UNAVAILABLE" in err_msg:
+                    if attempt < AI_MAX_RETRIES:
+                        st.warning(f"Model `{AI_MODEL_NAME}` is busy (503). Retrying in {BASE_DELAY}s (Attempt {attempt}/{AI_MAX_RETRIES})...")
+                        time.sleep(BASE_DELAY)
+                    else:
+                        st.warning(f"Model `{AI_MODEL_NAME}` failed after {AI_MAX_RETRIES} attempts due to high demand.")
+                else:
+                    # Non-503 error (e.g. invalid key, schema error) -> raise immediately
+                    raise e
+
+        # Clean up uploaded file from Gemini storage
+        self.client.files.delete(name=gemini_file.name)
+        
+        return parsed
 
 def call_ai(file_bytes, mime_type, prompt):
     """
@@ -408,57 +401,7 @@ def call_ai_with_retry(file_bytes, mime_type, prompt, max_retries=AI_MAX_RETRIES
 
 
 
-def ExtractFields(uploadedFile):
-    print("Processing document...")
 
-    client = genai.Client(api_key=get_api_key())
-
-
-    gemini_file = client.files.upload(
-        file=uploadedFile,
-        config=types.UploadFileConfig(mime_type=uploadedFile.type)
-    )
-
-    print("Analyzing report and extracting data...")
-
-    # For loop to keep prompting for response
-    for attempt in range(1, AI_MAX_RETRIES + 1):
-        try:
-            response = client.models.generate_content(
-                model=AI_MODEL_NAME,
-                contents=[
-                    gemini_file, 
-                    build_prompt("vital")
-                ],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=ComprehensiveMedicalAnalysis,
-                    temperature=0.1,
-                ),
-            )
-            break # exits on successful response
-
-        except Exception as e:
-            err_msg = str(e)
-            print(err_msg)
-            # Check for 503 / High Demand
-            if "503" in err_msg or "UNAVAILABLE" in err_msg:
-                if attempt < AI_MAX_RETRIES:
-                    st.warning(f"Model `{AI_MODEL_NAME}` is busy (503). Retrying in {BASE_DELAY}s (Attempt {attempt}/{AI_MAX_RETRIES})...")
-                    time.sleep(BASE_DELAY)
-                else:
-                    st.warning(f"Model `{AI_MODEL_NAME}` failed after {AI_MAX_RETRIES} attempts due to high demand.")
-            else:
-                # Non-503 error (e.g. invalid key, schema error) -> raise immediately
-                raise e
-
-    # 5. Output the clean JSON results
-    extracted_json = parse_response(response.text)
-
-    # Clean up uploaded file from Gemini storage
-    client.files.delete(name=gemini_file.name)
-    
-    return extracted_json
 
 #main for testing
 if __name__ == "__main__":
