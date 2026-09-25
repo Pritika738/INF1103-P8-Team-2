@@ -13,7 +13,7 @@ from datetime import datetime, date
 import pandas as pd
 
 st.set_page_config(
-    page_title="VitalTrack - Health History and Consultation Prep",
+    page_title="PASSAY - Health History and Consultation Prep",
     page_icon="🩺",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -106,22 +106,25 @@ def inject_css():
             visibility: hidden;
         }
 
-        [data-testid="stToolbar"],
         [data-testid="stStatusWidget"],
         [data-testid="stDecoration"] {
             display: none !important;
         }
 
-        /* Keep Streamlit header available so sidebar can be reopened */
-        [data-testid="stHeader"] {
-            background: transparent !important;
-        }
-
-        /* Keep sidebar collapse / reopen control visible */
-        [data-testid="collapsedControl"] {
+        /* Toolbar must stay alive because it contains the sidebar reopen button */
+        [data-testid="stToolbar"] {
             display: flex !important;
             visibility: visible !important;
         }
+
+        /* Sidebar reopen button */
+        [data-testid="stExpandSidebarButton"] {
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            pointer-events: auto !important;
+        }
+
         .block-container { padding-top: 2rem; max-width: 1150px; }
 
         .stApp, .stApp p, .stApp span, .stApp label, .stApp li,
@@ -233,6 +236,21 @@ def inject_css():
         .vt-hero { animation: springIn 0.6s cubic-bezier(0.34,1.56,0.64,1) both; }
         .vt-badge { animation: fadeIn 0.7s ease both; }
         .vt-bob { display:inline-block; animation: bob 3s ease-in-out infinite; }
+        /* Keep Streamlit header available for sidebar controls */
+        [data-testid="stHeader"] {
+            display: block !important;
+            visibility: visible !important;
+            background: transparent !important;
+        }
+
+        /* Keep sidebar collapse/reopen controls visible */
+        [data-testid="stSidebarCollapseButton"],
+        [data-testid="collapsedControl"] {
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            pointer-events: auto !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -430,7 +448,7 @@ def sidebar_nav():
             "<div class='vt-bob' style='font-size:2.6rem;'>🩺</div>"
             "<div style='font-size:1.55rem;font-weight:800;font-family:Baloo 2;"
             "background:linear-gradient(90deg,#a78bfa,#5eead4);-webkit-background-clip:text;"
-            "-webkit-text-fill-color:transparent;'>VitalTrack</div>"
+            "-webkit-text-fill-color:transparent;'>PASSAY</div>"
             "<div style='font-size:0.72rem;opacity:0.65;'>Health history and consultation</div>"
             "</div>",
             unsafe_allow_html=True,
@@ -1055,7 +1073,7 @@ def show_login():
             "background:linear-gradient(90deg,#a78bfa,#5eead4);"
             "-webkit-background-clip:text;"
             "-webkit-text-fill-color:transparent;'>"
-            "VitalTrack"
+            "PASSAY"
             "</h1>"
             "<p style='color:#a6b0d0;'>"
             "Track your health over time and prepare for your next appointment."
@@ -1141,7 +1159,7 @@ def show_register():
 
     with mid:
 
-        # Keep the same VitalTrack visual style
+        # Keep the same PASSAY visual style
         st.markdown(
             "<div class='vt-hero' style='text-align:center;margin-top:2rem;'>"
             "<div class='vt-bob' style='font-size:3rem;'>🩺</div>"
@@ -1152,7 +1170,7 @@ def show_register():
             "Create Account"
             "</h1>"
             "<p style='color:#a6b0d0;'>"
-            "Create your secure VitalTrack profile."
+            "Create your secure PASSAY profile."
             "</p>"
             "</div>",
             unsafe_allow_html=True,
@@ -1485,12 +1503,7 @@ def show_upload():
 
         uploaded_files = st.file_uploader(
             "Medical Report",
-            type=[
-                "pdf",
-                "png",
-                "jpg",
-                "jpeg"
-            ],
+            type=["pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True
         )
 
@@ -1500,6 +1513,51 @@ def show_upload():
             "Supported formats: PDF, PNG, JPG and JPEG. "
             "Maximum file size: 10 MB per file."
         )
+
+        extensions = [
+            Path(file.name).suffix.lower()
+            for file in uploaded_files
+        ]
+
+        pdf_count = extensions.count(".pdf")
+
+        image_extensions = {
+            ".png",
+            ".jpg",
+            ".jpeg"
+        }
+
+        # More than one PDF is not allowed
+        if pdf_count > 1:
+
+            st.error(
+                "Please upload only one PDF at a time."
+            )
+
+        # PDF cannot be mixed with images
+        elif (
+            pdf_count == 1
+            and len(uploaded_files) > 1
+        ):
+
+            st.error(
+                "Please upload either one PDF OR one or more "
+                "image pages of the same report, not both."
+            )
+
+        # Multiple files must all be images
+        elif (
+            len(uploaded_files) > 1
+            and not all(
+                extension in image_extensions
+                for extension in extensions
+            )
+        ):
+
+            st.error(
+                "Multiple-file upload is only supported "
+                "for PNG, JPG or JPEG images."
+            )
 
         # -------------------------------------------------
         # SHOW SELECTED FILES
@@ -2057,21 +2115,51 @@ def build_pdf(who, report):
 inject_css()
 
 if st.session_state.page in ("login", "register"):
+
+    # Create the sidebar from the beginning so Streamlit
+    # remembers its initial expanded state.
+    with st.sidebar:
+        st.markdown("")
+
+    # Hide the sidebar while the user is on Login/Register.
+    st.markdown(
+        """
+        <style>
+        section[data-testid="stSidebar"] {
+            display: none !important;
+        }
+
+        [data-testid="stExpandSidebarButton"] {
+            display: none !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     if st.session_state.page == "login":
         show_login()
     else:
         show_register()
+
 else:
+
     sidebar_nav()
+
     if st.session_state.page == "dashboard":
         show_dashboard()
+
     elif st.session_state.page == "upload":
         show_upload()
+
     elif st.session_state.page == "history":
         show_history()
+
     elif st.session_state.page == "trends":
         show_trends()
+
     elif st.session_state.page == "consultation":
         show_consultation()
+
     else:
         show_dashboard()
