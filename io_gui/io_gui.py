@@ -2,6 +2,7 @@ import streamlit as st
 import json
 import os
 import re
+import calendar
 import hashlib
 import hmac
 import secrets
@@ -272,10 +273,9 @@ def stat_tile(label, value, color):
 if "page" not in st.session_state:
     st.session_state.page = "login"
 
-if "accounts" not in st.session_state:
-    st.session_state.accounts = {}
-
 RECORDS_PATH = os.path.join("data", "health_records.json")
+
+USERS_PATH = Path(__file__).resolve().parent.parent / "data" / "users.json"
 
 def load_records():
     if not os.path.exists(RECORDS_PATH):
@@ -467,23 +467,11 @@ def sidebar_nav():
             use_container_width=True
         ):
 
-            # Keep temporary registered accounts
-            # so the user can log back in.
-            accounts = st.session_state.get(
-                "accounts",
-                {}
-            )
-
-            # Clear the current logged-in session.
             for key in list(
                 st.session_state.keys()
-            ):
+        ):
                 del st.session_state[key]
 
-            # Restore registered accounts.
-            st.session_state.accounts = accounts
-
-            # Return to the login screen.
             st.session_state.page = "login"
 
             st.rerun()
@@ -583,19 +571,129 @@ def hash_password(
 
     return hashed_password.hex()
 
+def load_accounts() -> dict:
+    """
+    Load registered accounts from the users JSON file.
+    """
+
+    if not USERS_PATH.exists():
+        return {}
+
+    try:
+
+        with open(
+            USERS_PATH,
+            "r",
+            encoding="utf-8"
+        ) as file:
+
+            accounts = json.load(file)
+
+        if isinstance(accounts, dict):
+            return accounts
+
+    except (
+        json.JSONDecodeError,
+        OSError
+    ):
+        pass
+
+    return {}
+
+
+def save_accounts(accounts: dict) -> None:
+    """
+    Save registered accounts permanently.
+    """
+
+    USERS_PATH.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    with open(
+        USERS_PATH,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            accounts,
+            file,
+            indent=4
+        )
 
 def create_temporary_account(
     username: str,
     email: str,
     password: str
 ) -> tuple[bool, str]:
+    """
+    Create an account and save it permanently
+    to data/users.json.
+
+    Data Manager will take over this responsibility
+    later during integration.
+    """
 
     username = username.strip()
     email = email.strip().lower()
 
     username_key = username.lower()
 
-    accounts = st.session_state.accounts
+    accounts = load_accounts()
+
+    # Check duplicate username
+    if username_key in accounts:
+
+        return (
+            False,
+            "That username is already taken."
+        )
+
+    # Check duplicate email
+    for account in accounts.values():
+
+        if account.get(
+            "email",
+            ""
+        ).lower() == email:
+
+            return (
+                False,
+                "An account already exists "
+                "with this email address."
+            )
+
+    # Create random salt for password hashing
+    salt = secrets.token_hex(16)
+
+    # Store HASH, not actual password
+    accounts[username_key] = {
+        "username": username,
+        "email": email,
+        "salt": salt,
+        "password_hash": hash_password(
+            password,
+            salt
+        )
+    }
+
+    save_accounts(
+        accounts
+    )
+
+    return (
+        True,
+        "Account created successfully."
+    )
+
+    username = username.strip()
+    email = email.strip().lower()
+
+    username_key = username.lower()
+
+    accounts = load_accounts()
 
     if username_key in accounts:
         return False, "That username is already taken."
@@ -621,10 +719,9 @@ def create_temporary_account(
         )
     }
 
-    st.session_state.accounts = accounts
+    save_accounts(accounts)
 
     return True, "Account created successfully."
-
 
 def authenticate_temporary_account(
     username: str,
@@ -633,9 +730,9 @@ def authenticate_temporary_account(
 
     username_key = username.strip().lower()
 
-    account = (
-        st.session_state.accounts.get(username_key)
-    )
+    accounts = load_accounts()
+
+    account = accounts.get(username_key)
 
     if account is None:
         return False
@@ -649,7 +746,6 @@ def authenticate_temporary_account(
         entered_hash,
         account["password_hash"]
     )
-
 
 def validate_uploaded_report(
     uploaded_file
@@ -837,7 +933,7 @@ def create_temporary_account(
 
     username_key = username.lower()
 
-    accounts = st.session_state.accounts
+    accounts = load_accounts()
 
     if username_key in accounts:
         return False, "That username is already taken."
@@ -863,34 +959,9 @@ def create_temporary_account(
         )
     }
 
-    st.session_state.accounts = accounts
+    save_accounts(accounts)
 
     return True, "Account created successfully."
-
-
-def authenticate_temporary_account(
-    username: str,
-    password: str
-) -> bool:
-
-    username_key = username.strip().lower()
-
-    account = (
-        st.session_state.accounts.get(username_key)
-    )
-
-    if account is None:
-        return False
-
-    entered_hash = hash_password(
-        password,
-        account["salt"]
-    )
-
-    return hmac.compare_digest(
-        entered_hash,
-        account["password_hash"]
-    )
 
 
 def validate_uploaded_report(
@@ -1037,7 +1108,9 @@ def show_login():
 
                 else:
 
-                    account = st.session_state.accounts[
+                    accounts = load_accounts()
+
+                    account = accounts[
                         username.strip().lower()
                     ]
 
@@ -1250,25 +1323,167 @@ def show_upload():
 
     hero(
         "Add a Medical Report",
-        "Upload your medical report for validation "
+        "Upload one medical report for validation "
         "before health information is extracted."
     )
 
     with st.container(border=True):
 
-        st.subheader(
-            "Report details"
+        st.subheader("Report details")
+
+        # -------------------------------------------------
+        # DATE INFORMATION
+        # -------------------------------------------------
+
+        date_type = st.radio(
+            "What date information is available on the report?",
+            [
+                "Exact date",
+                "Year only"
+            ],
+            horizontal=True
         )
 
-        # User selects the date of the report
-        report_date = st.date_input(
-            "Report Date",
-            value=date.today(),
-            max_value=date.today()
-        )
+        if date_type == "Exact date":
 
-        # User chooses the medical report
-        uploaded_file = st.file_uploader(
+            st.markdown("**Report Date**")
+
+            current_date = date.today()
+
+            col1, col2, col3 = st.columns(3)
+
+            # -------------------------
+            # YEAR
+            # -------------------------
+
+            with col1:
+
+                selected_year = st.selectbox(
+                    "Year",
+                    options=list(
+                        range(
+                            current_date.year,
+                            1939,
+                            -1
+                        )
+                    )
+                )
+
+            # -------------------------
+            # MONTH
+            # -------------------------
+
+            months = {
+                "January": 1,
+                "February": 2,
+                "March": 3,
+                "April": 4,
+                "May": 5,
+                "June": 6,
+                "July": 7,
+                "August": 8,
+                "September": 9,
+                "October": 10,
+                "November": 11,
+                "December": 12
+            }
+
+            with col2:
+
+                # If current year is selected,
+                # do not allow future months.
+                if selected_year == current_date.year:
+
+                    available_months = list(
+                        months.keys()
+                    )[:current_date.month]
+
+                else:
+
+                    available_months = list(
+                        months.keys()
+                    )
+
+                selected_month_name = st.selectbox(
+                    "Month",
+                    options=available_months
+                )
+
+                selected_month = months[
+                    selected_month_name
+                ]
+
+            # -------------------------
+            # DAY
+            # -------------------------
+
+            import calendar
+
+            days_in_month = calendar.monthrange(
+                selected_year,
+                selected_month
+            )[1]
+
+            # Prevent future days if current
+            # month/year are selected.
+            if (
+                selected_year == current_date.year
+                and selected_month == current_date.month
+            ):
+
+                maximum_day = current_date.day
+
+            else:
+
+                maximum_day = days_in_month
+
+            with col3:
+
+                selected_day = st.selectbox(
+                    "Day",
+                    options=list(
+                        range(
+                            1,
+                            maximum_day + 1
+                        )
+                    )
+                )
+
+            report_date = date(
+                selected_year,
+                selected_month,
+                selected_day
+            )
+
+            report_date_info = {
+                "date_precision": "exact",
+                "date": report_date.isoformat(),
+                "year": report_date.year
+            }
+
+        else:
+
+            current_year = date.today().year
+
+            report_year = st.number_input(
+                "Report Year",
+                min_value=1940,
+                max_value=current_year,
+                value=current_year,
+                step=1
+            )
+
+            report_date_info = {
+                "date_precision": "year",
+                "date": None,
+                "year": int(report_year)
+            }
+
+        # -------------------------------------------------
+        # FILE UPLOAD
+        # -------------------------------------------------
+
+        uploaded_files = st.file_uploader(
             "Medical Report",
             type=[
                 "pdf",
@@ -1276,46 +1491,46 @@ def show_upload():
                 "jpg",
                 "jpeg"
             ],
-            accept_multiple_files=False
+            accept_multiple_files=True
         )
 
         st.caption(
+            "Upload one PDF, one image, or multiple image pages "
+            "belonging to the same medical report. "
             "Supported formats: PDF, PNG, JPG and JPEG. "
-            "Maximum file size: 10 MB."
+            "Maximum file size: 10 MB per file."
         )
 
-        # Show information once a file has been chosen
-        if uploaded_file is not None:
+        # -------------------------------------------------
+        # SHOW SELECTED FILES
+        # -------------------------------------------------
 
-            size_kb = (
-                uploaded_file.size
-                / 1024
-            )
+        if uploaded_files:
 
             st.markdown(
-                "**Selected file:** "
-                + uploaded_file.name
+                f"**{len(uploaded_files)} file(s) selected**"
             )
 
-            st.caption(
-                f"File size: {size_kb:.1f} KB"
-            )
-
-            # Preview image reports
-            if (
-                uploaded_file.type
-                and uploaded_file.type.startswith(
-                    "image/"
-                )
+            for number, uploaded_file in enumerate(
+                uploaded_files,
+                start=1
             ):
 
-                st.image(
-                    uploaded_file,
-                    caption="Medical report preview",
-                    use_container_width=True
+                size_kb = uploaded_file.size / 1024
+
+                st.write(
+                    f"**{number}. {uploaded_file.name}**"
+                )
+
+                st.caption(
+                    f"File size: {size_kb:.1f} KB"
                 )
 
         st.write("")
+
+        # -------------------------------------------------
+        # VALIDATION
+        # -------------------------------------------------
 
         if st.button(
             "Validate Medical Report",
@@ -1323,52 +1538,131 @@ def show_upload():
             use_container_width=True
         ):
 
-            valid, message = (
-                validate_uploaded_report(
-                    uploaded_file
-                )
-            )
-
-            if not valid:
+            if not uploaded_files:
 
                 st.error(
-                    message
+                    "Please select a medical report."
                 )
 
             else:
 
-                # Remember validated upload temporarily.
-                # AI Manager will use this later.
-                st.session_state[
-                    "validated_report"
-                ] = {
+                extensions = [
+                    Path(file.name).suffix.lower()
+                    for file in uploaded_files
+                ]
 
-                    "name":
-                        uploaded_file.name,
+                pdf_count = extensions.count(".pdf")
 
-                    "date":
-                        report_date.isoformat(),
-
-                    "mime_type":
-                        uploaded_file.type,
-
-                    "size":
-                        uploaded_file.size,
-
-                    "bytes":
-                        uploaded_file.getvalue()
+                image_extensions = {
+                    ".png",
+                    ".jpg",
+                    ".jpeg"
                 }
 
-                st.success(
-                    "Medical report passed "
-                    "input validation."
-                )
+                # More than one PDF is not one report submission
+                if pdf_count > 1:
 
-                st.info(
-                    "The report is ready for AI analysis. "
-                    "AI extraction will be connected when "
-                    "the AI Manager is integrated."
-                )
+                    st.error(
+                        "Please upload only one PDF at a time."
+                    )
+
+                # PDF cannot be mixed with image pages
+                elif (
+                    pdf_count == 1
+                    and len(uploaded_files) > 1
+                ):
+
+                    st.error(
+                        "Please upload either one PDF OR multiple "
+                        "image pages of the same report, not both."
+                    )
+
+                # Multiple files must all be images
+                elif (
+                    len(uploaded_files) > 1
+                    and not all(
+                        extension in image_extensions
+                        for extension in extensions
+                    )
+                ):
+
+                    st.error(
+                        "Multiple-file upload is only supported "
+                        "for PNG, JPG or JPEG pages belonging "
+                        "to the same medical report."
+                    )
+
+                else:
+
+                    validated_pages = []
+                    errors = []
+
+                    for uploaded_file in uploaded_files:
+
+                        valid, message = validate_uploaded_report(
+                            uploaded_file
+                        )
+
+                        if valid:
+
+                            validated_pages.append(
+                                {
+                                    "name": uploaded_file.name,
+                                    "mime_type": uploaded_file.type,
+                                    "size": uploaded_file.size,
+                                    "bytes": uploaded_file.getvalue()
+                                }
+                            )
+
+                        else:
+
+                            errors.append(
+                                f"{uploaded_file.name}: {message}"
+                            )
+
+                    if errors:
+
+                        st.error(
+                            "Some uploaded files failed validation:"
+                        )
+
+                        for error in errors:
+                            st.write(f"• {error}")
+
+                    else:
+
+                        st.session_state["validated_report"] = {
+                            "date_precision":
+                                report_date_info["date_precision"],
+
+                            "date":
+                                report_date_info["date"],
+
+                            "year":
+                                report_date_info["year"],
+
+                            "pages":
+                                validated_pages
+                        }
+
+                        st.success(
+                            "Medical report passed input validation."
+                        )
+
+                        if len(validated_pages) > 1:
+
+                            st.info(
+                                f"{len(validated_pages)} image pages "
+                                "were recognised as one medical report."
+                            )
+
+                        else:
+
+                            st.info(
+                                "The report is ready for AI analysis. "
+                                "AI extraction will be connected when "
+                                "the AI Manager is integrated."
+                            )
 
 def show_history():
     hero("Health History", "Every reading you have recorded, over time")
