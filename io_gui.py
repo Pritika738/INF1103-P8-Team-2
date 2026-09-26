@@ -1,10 +1,11 @@
 import streamlit as st
 import json
-from logic_manager import process_vitals_extraction, save_analysis_by_report_date
+from logic_manager import process_vitals_extraction, process_summary_report, save_analysis_by_report_date
 import pandas as pd
 import io_manager
 import logic_manager
 import data_manager
+from datetime import date
 # --------------------------------------------------
 # PAGE CONFIGURATION
 # --------------------------------------------------
@@ -170,7 +171,7 @@ def show_upload():
 
                 print("json file saved.")
                 # Save the file into your "./data" directory automatically named after the report date
-                saved_disk_path = save_analysis_by_report_date(extracted_data)
+                saved_disk_path = save_analysis_by_report_date(extracted_data, "report")
                 st.success(f"Extraction Complete! File archived on server at: {saved_disk_path}")
                 
                 # Cache the resulting object in session state so it survives the download trigger
@@ -273,7 +274,38 @@ def show_trends():
 def show_consultation():
     st.title("Consultation Preparation Report")
 
-    st.write("Consultation report will go here.")
+    if st.button("Process Report"):
+        with st.spinner("Processing report..."):
+            try:
+                # Hand control right over to the Logic Layer
+                extracted_data = process_summary_report()
+                
+                # Save the file into your "./data" directory automatically named after the report date
+                saved_disk_path = save_analysis_by_report_date(extracted_data, "summary")
+                st.success(f"Summary Complete! File archived on server at: {saved_disk_path}")
+                
+                # Cache the resulting object in session state so it survives the download trigger
+                st.session_state["extracted_json_data"] = extracted_data
+        
+                # Serialize the data to a clean string format
+                if isinstance(extracted_data, dict):
+                    json_string = json.dumps(extracted_data, indent=2, ensure_ascii=False)
+                else:
+                    json_string = json.dumps(extracted_data.model_dump(), indent=2, ensure_ascii=False)
+        
+                # Provide the Download Button safely linked to the extracted report date name
+                st.download_button(
+                    label="💾 Download JSON File",
+                    data=json_string,
+                    file_name=f"report_{date.today().strftime("%B_%d_%Y")}.json",
+                    mime="application/json"
+                )
+
+
+                # Display your structured payload visually in the dashboard
+                st.json(extracted_data)
+            except Exception as e:
+                st.error(f"An error occurred during extraction: {e}")
 
     if st.button("Back to Dashboard"):
         st.session_state.page = "dashboard"

@@ -222,7 +222,7 @@ def process_summary_report() -> TrendAnalysis:
     # Return the validated Python object
     return TrendAnalysis.model_validate_json(raw_json)
 
-def save_analysis_by_report_date(analysis_data: ComprehensiveMedicalAnalysis) -> str:
+def save_analysis_by_report_date(analysis_data: ComprehensiveMedicalAnalysis, reporttype:str) -> str:
     """
     Saves the validated Pydantic model payload as a clean JSON file,
     naming it after the extracted report date.
@@ -242,7 +242,7 @@ def save_analysis_by_report_date(analysis_data: ComprehensiveMedicalAnalysis) ->
         
     # Remove characters that are illegal in file names and replace to '_'
     safe_filename = str(report_date).replace("/", "-").replace(" ", "_")
-    file_path = os.path.join(DATA_DIR, f"report_{safe_filename}.json")
+    file_path = os.path.join(DATA_DIR, f"{reporttype}_{safe_filename}.json")
     
     # Save the json file as 'report_{date}.json'
     with open(file_path, "w", encoding="utf-8") as f:
