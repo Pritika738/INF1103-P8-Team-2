@@ -36,6 +36,7 @@ API_KEY_ENV_VAR = "GEMINI_API_KEY"
 
 # Maximum number of times ai_manager should retry a failed AI call.
 AI_MAX_RETRIES = 3
+
 # Base wait time in between each retry 
 BASE_DELAY = 5
 

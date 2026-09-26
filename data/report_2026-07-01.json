@@ -1,0 +1,26 @@
+{
+  "database_vitals": {
+    "date": "2026-07-01",
+    "blood_pressure": "132/85",
+    "heart_rate": 104,
+    "blood_glucose": "6.6 mmol/L"
+  },
+  "patient_summary": "This report from your visit on July 1, 2026, shows your current vital signs and fasting blood glucose levels. While most results are within a stable range, your heart rate was slightly elevated at 104 bpm, and you noted some occasional fatigue. Dr. Smith recommends a follow-up in three months to check on your progress.",
+  "action_items": [
+    {
+      "topic": "Follow-up",
+      "criticality": "Medium",
+      "message": "Schedule a follow-up appointment in 3 months (around October 2026) as recommended."
+    },
+    {
+      "topic": "Vitals",
+      "criticality": "Medium",
+      "message": "Your heart rate was recorded at 104 bpm; please monitor for any persistent rapid heartbeat or palpitations."
+    },
+    {
+      "topic": "Symptoms",
+      "criticality": "Low",
+      "message": "Keep a log of when you feel fatigued to provide more detail during your next visit."
+    }
+  ]
+}

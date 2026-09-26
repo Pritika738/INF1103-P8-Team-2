@@ -1,0 +1,26 @@
+{
+  "database_vitals": {
+    "date": "2026-09-22",
+    "blood_pressure": "188/122",
+    "heart_rate": 138,
+    "blood_glucose": "15.4 mmol/L"
+  },
+  "patient_summary": "Your medical report from September 22, 2026, shows that your blood pressure, heart rate, and blood glucose levels are currently very high. Given your symptoms of chest discomfort and blurred vision, Dr. Smith has recommended an urgent referral for further medical care.",
+  "action_items": [
+    {
+      "topic": "Urgent Referral",
+      "criticality": "High",
+      "message": "Follow the recommendation for an urgent referral immediately due to your chest discomfort and blurred vision."
+    },
+    {
+      "topic": "Vitals",
+      "criticality": "High",
+      "message": "Your blood pressure (188/122 mmHg) and heart rate (138 bpm) are critically elevated and require immediate medical intervention."
+    },
+    {
+      "topic": "Blood Glucose",
+      "criticality": "High",
+      "message": "Your fasting blood glucose is 15.4 mmol/L, which is significantly high and needs to be addressed by a healthcare provider."
+    }
+  ]
+}

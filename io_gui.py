@@ -1,8 +1,7 @@
 import streamlit as st
 import json
-from ai_manager import ExtractFields 
 import io_manager
-
+from logic_manager import process_vitals_extraction, save_analysis_by_report_date
 # --------------------------------------------------
 # PAGE CONFIGURATION
 # --------------------------------------------------
@@ -131,28 +130,59 @@ def show_upload():
     if st.button("Process Report"):
         with st.spinner("Processing report..."):
             try:
-                # sends uploaded file into the ai_manager.py 
-                extracted_json = ExtractFields(uploaded_file)
+                file_bytes = uploaded_file.read()
+                
+                # Hand control right over to the Logic Layer
+                extracted_data = process_vitals_extraction(
+                    file_bytes=file_bytes, 
+                    mime_type=uploaded_file.type
+                )
 
-                # Display result in Streamlit UI
-                st.success("Extraction Complete!")
-                st.json(extracted_json)
-
-                # Provide a Download Button for the JSON file (temporary)
-                json_string = json.dumps(extracted_json, indent=2)
+                print("json file saved.")
+                # Save the file into your "./data" directory automatically named after the report date
+                saved_disk_path = save_analysis_by_report_date(extracted_data)
+                st.success(f"Extraction Complete! File archived on server at: {saved_disk_path}")
+                
+                # Cache the resulting object in session state so it survives the download trigger
+                st.session_state["extracted_json_data"] = extracted_data
+                        
+                # Safely look for the extracted date inside your dictionary or Pydantic model
+                # Adjust this line depending on whether extracted_data is a dict or a Pydantic model
+                report_date = "unknown_date"
+                if isinstance(extracted_data, dict):
+                    report_date = extracted_data.get("database_vitals", {}).get("date", "unknown_date")
+                else:
+                    # If it's a Pydantic object
+                    report_date = getattr(getattr(extracted_data, "database_vitals", None), "date", "unknown_date")
+        
+                # Serialize the data to a clean string format
+                if isinstance(extracted_data, dict):
+                    json_string = json.dumps(extracted_data, indent=2, ensure_ascii=False)
+                else:
+                    json_string = json.dumps(extracted_data.model_dump(), indent=2, ensure_ascii=False)
+        
+                # Provide the Download Button safely linked to the extracted report date name
                 st.download_button(
                     label="💾 Download JSON File",
                     data=json_string,
-                    file_name=f"extracted_{uploaded_file.name}.json",
+                    file_name=f"report_{report_date}.json",
                     mime="application/json"
                 )
+
+
+                # Display your structured payload visually in the dashboard
+                st.json(extracted_data)
             except Exception as e:
                 st.error(f"An error occurred during extraction: {e}")
 
 
+
+    
+
     if st.button("Back to Dashboard"):
         st.session_state.page = "dashboard"
         st.rerun()
+
 
 
 def show_history():

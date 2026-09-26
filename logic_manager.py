@@ -16,22 +16,12 @@ currently return simple, safe default values.
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from typing import Dict, Optional
-from ai_manager import AIManager
+from ai_manager import ai_manager
+from config import DATA_DIR
+import os, json
 
-PROMPT_TEMPLATES: Dict[str, str] = {
-    "vital": (
-        "You are a data extraction assistant. You will be given a medical report as a PDF or image.\n\n"
-        "Extract the following health metrics if they are clearly visible in the report: heart rate, blood pressure (systolic and diastolic), and blood glucose.\n\n"
-        "Respond with ONLY valid JSON and nothing else - no markdown formatting, no code fences (```), no explanation, and no text before or after the JSON.\n\n"
-        "The JSON must contain exactly these fields, with no additional fields:\n"
-        'If no blood pressure reading is visible at all, set "blood_pressure" itself to null instead of guessing either value.\n\n'
-        "Rules you must follow:\n"
-        "- Do not diagnose any medical condition.\n"
-        "- Do not recommend or suggest any treatment, medication, or dosage.\n"
-        "- Do not invent, estimate, or guess a value that is not clearly present in the report - use null instead.\n"
-        "- Do not include any field other than heart_rate, blood_pressure, and blood_glucose."
-    ),
-    
+# Prompt templates for to prompt AI
+PROMPT_TEMPLATES: Dict[str, str] = {    
     "extract": (
         "You are a compassionate clinical communication assistant. Your task is to process "
         "this medical document to extract data, synthesize findings, and flag key follow-ups.\n\n"
@@ -47,33 +37,46 @@ PROMPT_TEMPLATES: Dict[str, str] = {
     ),
     
     "summary": (
-        "You are a document processing assistant.\n\n"
-        "Extract general administrative information from the medical report.\n\n"
-        "Respond with ONLY valid JSON strictly matching this structure:\n"
-        "{\n"
-        '  "provider_name": <string or null>,\n'
-        '  "report_date": <string YYYY-MM-DD or null>,\n'
-        '  "document_type": <string or null>\n'
-        "}\n\n"
-        "Rules:\n"
-        "- Do not invent details; use null if not visible."
+        "You are an advanced clinical analytics specialist. You will be provided with a "
+        "chronological list of multiple historical health records belonging to the same patient.\n\n"
+        "HISTORICAL PATIENT DATA:\n"
+        "{json_data}\n\n" # Required*** DO NOT REMOVE
+        "INSTRUCTIONS:\n"
+        "- Analyze these reports sequentially from the oldest file date to the newest.\n"
+        "- Identify clear metric trajectories, systemic trends, and escalating shifts.\n"
+        "- Explicitly pull out any deteriorating vital paths into your critical focus areas.\n\n"
+        "CRITICAL RULES:\n"
+        "- Focus strictly on comparing the provided historical data points. Do not guess records.\n"
+        "- Map your synthesis fields precisely to match the properties required by the schema."
     )
 }
 
-# 1. Database Mapping Schema
+# 1.1 Schema for summary
+class TrendMetric(BaseModel):
+    metric: str = Field(description="The health metric being tracked (e.g., Blood Pressure, Heart Rate)")
+    direction: str = Field(description="The trend trajectory over time: 'Improving', 'Worsening', or 'Stable'")
+    observation: str = Field(description="A brief description of what the numbers show over the dates.")
+
+# 1.2 Schema for summary
+class TrendAnalysis(BaseModel):
+    overall_health_trajectory: str = Field(description="A 3-4 sentence high-level overview of how the patient is progressing across all reports.")
+    key_areas_of_concern: List[str] = Field(description="Bullet points of specific metrics or symptoms that need immediate medical review.")
+    tracked_trends: List[TrendMetric] = Field(description="A list breakdown of each individual vital sign's trend trajectory.")
+
+# 2.1 Schema for data extraction
 class VitalsReading(BaseModel):
     date: str = Field(description="The date of the report or reading formatted as YYYY-MM-DD")
     blood_pressure: Optional[str] = Field(None, description="The blood pressure reading, e.g., '140/80'")
     heart_rate: Optional[int] = Field(None, description="The pulse/heart rate value as an integer bpm")
     blood_glucose: Optional[str] = Field(None, description="The blood glucose value if present, otherwise null")
 
-# 2. Key Action Item / Alert Schema
+# 2.2 Schema for data extraction
 class PatientAlert(BaseModel):
     topic: str = Field(description="The category of the alert (e.g., Medication, Vitals, Follow-up)")
     criticality: str = Field(description="Severity indicator: 'High', 'Medium', or 'Low'")
     message: str = Field(description="Clear, actionable advice on what the patient needs to watch out for or do")
 
-# 3. Complete API Payload Structure
+# 2.3 Schema for data extraction
 class ComprehensiveMedicalAnalysis(BaseModel):
     # For your database
     database_vitals: VitalsReading = Field(description="Cleaned numeric and structured health metrics for DB storage")
@@ -83,20 +86,81 @@ class ComprehensiveMedicalAnalysis(BaseModel):
     action_items: List[PatientAlert] = Field(description="Important flags, medications to continue, or next steps the user must remember.")
 
 
-def process_medical_report(uploadedFile):
-    prompt = PROMPT_TEMPLATES["extract"]
+def process_vitals_extraction(file_bytes: bytes, mime_type: str) -> ComprehensiveMedicalAnalysis:
+    print("extracting... ")
+    
+    prompt_text = PROMPT_TEMPLATES.get("extract", "Extract data fields cleanly.")
 
-    # Calls AI Manager dynamically with its own domain schemas
-    raw_ai_response = AIManager.ExtractFields(
-        payload=uploadedFile,
-        prompt_text=prompt,
-        schema=ComprehensiveMedicalAnalysis # Domain schema lives here
+    # Call AI Manager
+    raw_json = ai_manager.call_ai_structured(
+        file_bytes=file_bytes,
+        mime_type=mime_type,
+        prompt=prompt_text,     # Prompt from PROMPT_TEMPLATE for easy edit
+        schema=ComprehensiveMedicalAnalysis     # Injected dynamic typing reference
     )
+
+    print("extraction complete!")
+    # Return the validated Python object
+    return ComprehensiveMedicalAnalysis.model_validate_json(raw_json)
+
+def process_summary_report() -> TrendAnalysis:
+    all_reports = []
+
+    # Read all saved JSON report files in DATA_DIR
+    if os.path.exists(DATA_DIR):
+        for filename in sorted(os.listdir(DATA_DIR)):
+            if filename.startswith("report_") and filename.endswith(".json"):
+                file_path = os.path.join(DATA_DIR, filename)
+                with open(file_path, "r", encoding="utf-8") as f:
+                    all_reports.append(json.load(f))
+
+    # If no report is detected
+    if not all_reports:
+        raise ValueError("No historical reports found in the data directory to analyze.")
+
+    # Create prompt
+    base_template = PROMPT_TEMPLATES["summary"]
+    if not base_template:
+        raise ValueError("The 'summary' prompt template is missing from global configurations.")
+        
+    final_prompt = base_template.format(json_data=json.dumps(all_reports, indent=2)) #json_data in prompt
+
+    # Call AI Manager
+    raw_json = ai_manager.call_ai_structured_no_file(
+        prompt=final_prompt,
+        schema=TrendAnalysis
+    )
+
+    # Return the validated Python object
+    return TrendAnalysis.model_validate_json(raw_json)
+
+def save_analysis_by_report_date(analysis_data: ComprehensiveMedicalAnalysis) -> str:
+    """
+    Saves the validated Pydantic model payload as a clean JSON file,
+    naming it after the extracted report date.
+    """
+    # Ensure the destination folder exists safely
+    os.makedirs(DATA_DIR, exist_ok=True)
     
-    # Save to database, trigger alerts if blood pressure is too high, etc.
-    #database.save(raw_ai_response.database_vitals) 
+    # Extract the date from the json file
+    # If the date field is empty or missing, fallback cleanly to avoid a crash
+    report_date = None
+    if analysis_data.database_vitals:
+        report_date = getattr(analysis_data.database_vitals, "date", None)
+        
+    if not report_date:
+        from datetime import datetime
+        report_date = f"unknown_date_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+    # Remove characters that are illegal in file names and replace to '_'
+    safe_filename = str(report_date).replace("/", "-").replace(" ", "_")
+    file_path = os.path.join(DATA_DIR, f"report_{safe_filename}.json")
     
-    return raw_ai_response
+    # Save the json file as 'report_{date}.json'
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(analysis_data.model_dump(), f, indent=2, ensure_ascii=False)
+        
+    return file_path
 
 def analyse_health_trends(records):
     """
