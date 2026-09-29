@@ -1,0 +1,21 @@
+{
+  "database_vitals": {
+    "date": "2026-12-01",
+    "blood_pressure": "142/92",
+    "heart_rate": 112,
+    "blood_glucose": null
+  },
+  "patient_summary": "Hello Michael, your medical report from Riverside Medical Centre shows that your heart rate and blood pressure are currently higher than the standard range. Dr. Kapoor noted your concerns regarding heart palpitations, so it is important to monitor how you are feeling closely.",
+  "action_items": [
+    {
+      "topic": "Vitals",
+      "criticality": "High",
+      "message": "Your heart rate (112 bpm) and blood pressure (142/92 mmHg) are elevated; please continue to monitor these readings as directed by your physician."
+    },
+    {
+      "topic": "Symptoms",
+      "criticality": "Medium",
+      "message": "Keep a record of when you experience heart palpitations to provide more detail for your follow-up with Dr. Kapoor."
+    }
+  ]
+}

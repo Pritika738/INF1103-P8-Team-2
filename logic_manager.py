@@ -54,7 +54,14 @@ PROMPT_TEMPLATES: Dict[str, str] = {
         "- Extract all visible numerical health metrics and vital signs.\n"
         "- Write a patient-friendly summary explaining the document's contents in clear, comforting language.\n"
         "- Flag critical, actionable areas or specific follow-up appointments the patient needs to remember.\n\n"
+        
+        # 🔧 CRITICAL FIX: Directing the model to omit structural wrappers
+        "JSON STRUCTURING RULE:\n"
+        "- Do NOT wrap properties with text labels like 'VitalsReading(...)' or 'PatientAlert(...)'.\n"
+        "- Output all fields strictly as standard, raw JSON objects, values, and lists.\n\n"
+        
         "CRITICAL SAFETY & QUALITY RULES:\n"
+        "- Do not include and personal details of the paitient in the summary"
         "- Do not provide a novel clinical diagnosis. Only summarize what the document states.\n"
         "- Do not suggest or prescribe medications, treatments, or alternative therapies.\n"
         "- Stick strictly to the text provided. Do not guess or infer missing clinical data."
@@ -174,7 +181,7 @@ class ComprehensiveMedicalAnalysis(BaseModel):
     action_items: List[PatientAlert] = Field(description="Important flags, medications to continue, or next steps the user must remember.")
 
 
-def process_vitals_extraction(file_bytes: bytes, mime_type: str) -> ComprehensiveMedicalAnalysis:
+def process_vitals_extraction(file_bytes: bytes, mime_type: str) -> VitalsReading:
     print("extracting... ")
     
     prompt_text = PROMPT_TEMPLATES.get("extract", "Extract data fields cleanly.")
@@ -184,12 +191,11 @@ def process_vitals_extraction(file_bytes: bytes, mime_type: str) -> Comprehensiv
         file_bytes=file_bytes,
         mime_type=mime_type,
         prompt=prompt_text,     # Prompt from PROMPT_TEMPLATE for easy edit
-        schema=ComprehensiveMedicalAnalysis     # Injected dynamic typing reference
+        schema=VitalsReading     # Injected dynamic typing reference
     )
 
-    print("extraction complete!")
-    # Return the validated Python object
-    return ComprehensiveMedicalAnalysis.model_validate_json(raw_json)
+    # Return the response
+    return VitalsReading.model_validate_json(raw_json)
 
 def process_summary_report() -> TrendAnalysis:
     all_reports = []
@@ -222,7 +228,7 @@ def process_summary_report() -> TrendAnalysis:
     # Return the validated Python object
     return TrendAnalysis.model_validate_json(raw_json)
 
-def save_analysis_by_report_date(analysis_data: ComprehensiveMedicalAnalysis, reporttype:str) -> str:
+def save_analysis_by_report_date(analysis_data , reporttype:str) -> str:
     """
     Saves the validated Pydantic model payload as a clean JSON file,
     naming it after the extracted report date.

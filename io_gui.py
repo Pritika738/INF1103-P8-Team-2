@@ -117,102 +117,102 @@ def show_dashboard():
 # --------------------------------------------------
 
 def show_upload():
-    st.title("Add Medical Report")
+    try:
+        st.title("Add Medical Report")
 
-    st.subheader("Upload Medical Report")
+        st.subheader("Upload Medical Report")
 
-    uploaded_file = st.file_uploader(
-        "Upload Medical Report",
-        type=["pdf", "png", "jpg", "jpeg"],
-        label_visibility="collapsed",
-    )
-    st.caption("Supported: PDF, PNG, JPG/JPEG")
+        uploaded_file = st.file_uploader(
+            "Upload Medical Report",
+            type=["pdf", "png", "jpg", "jpeg"],
+            label_visibility="collapsed",
+        )
+        st.caption("Supported: PDF, PNG, JPG/JPEG")
 
-    if uploaded_file is not None:
+        if uploaded_file is None:
+            return
+
         if not io_manager.is_supported_upload_type(uploaded_file.type):
             st.error("Unsupported file type. Please upload a PDF, PNG, or JPG/JPEG file.")
-        else:
-            st.write(f"Selected: {uploaded_file.name}")
-
-            if st.button("Process Report"):
-                with st.spinner("Processing report..."):
-                    ai_extracted = io_manager.process_uploaded_report(
-                        uploaded_file.getvalue(), uploaded_file.type
+            return
+        
+        st.write(f"Selected: {uploaded_file.name}")
+        
+        if st.button("Process Report"):
+            with st.spinner("Processing report..."):
+                try:
+                    file_bytes = uploaded_file.read()
+                    
+                    # Hand control right over to the Logic Layer
+                    extracted_data = process_vitals_extraction(
+                        file_bytes=file_bytes, 
+                        mime_type=uploaded_file.type
                     )
+
+                    print(f"Extracted data: {extracted_data}")
+
                     historical_records = data_manager.load_health_records()
                     processed_record = logic_manager.process_ai_record(
-                        ai_extracted, historical_records
+                        extracted_data, historical_records
                     )
 
-                if processed_record["decision"] == "REJECTED":
-                    st.error(processed_record["recommended_action"])
-                else:
-                    if data_manager.save_record(processed_record):
-                        st.success(f"Report processed and saved. Decision: {processed_record['decision']}")
+                    print(processed_record)
+
+                    print("json file saved.")
+                    # Save the file into your "./data" directory automatically named after the report date
+                    #saved_disk_path = save_analysis_by_report_date(extracted_data, "report")
+                    #print(f"Extraction Complete! File archived on server at: {saved_disk_path}")
+                    
+                    # Cache the resulting object in session state so it survives the download trigger
+                    st.session_state["extracted_json_data"] = extracted_data
+                            
+                    # Safely look for the extracted date inside your dictionary or Pydantic model
+                    # Adjust this line depending on whether extracted_data is a dict or a Pydantic model
+                    report_date = "unknown_date"
+                    if isinstance(extracted_data, dict):
+                        report_date = extracted_data.get("database_vitals", {}).get("date", "unknown_date")
                     else:
-                        st.error("Report was processed but could not be saved. Please try again.")
+                        # If it's a Pydantic object
+                        report_date = getattr(getattr(extracted_data, "database_vitals", None), "date", "unknown_date")
+            
+                    # Serialize the data to a clean string format
+                    if isinstance(extracted_data, dict):
+                        json_string = json.dumps(extracted_data, indent=2, ensure_ascii=False)
+                    else:
+                        json_string = json.dumps(extracted_data.model_dump(), indent=2, ensure_ascii=False)
+            
+                    # Provide the Download Button safely linked to the extracted report date name
+                    st.download_button(
+                        label="💾 Download JSON File",
+                        data=json_string,
+                        file_name=f"report_{report_date}.json",
+                        mime="application/json"
+                    )
 
 
-    st.write(processed_record["summary"])
-    st.json(processed_record["metrics"])
+                    # Display your structured payload visually in the dashboard
+                    st.json(extracted_data)
+                except Exception as e:
+                    st.error(f"An error occurred during extraction: {e}")
 
-    st.write(f"Selected: {uploaded_file.name}")
-    
-    if st.button("Process Report"):
-        with st.spinner("Processing report..."):
-            try:
-                file_bytes = uploaded_file.read()
-                
-                # Hand control right over to the Logic Layer
-                extracted_data = process_vitals_extraction(
-                    file_bytes=file_bytes, 
-                    mime_type=uploaded_file.type
-                )
 
-                print("json file saved.")
-                # Save the file into your "./data" directory automatically named after the report date
-                saved_disk_path = save_analysis_by_report_date(extracted_data, "report")
-                st.success(f"Extraction Complete! File archived on server at: {saved_disk_path}")
-                
-                # Cache the resulting object in session state so it survives the download trigger
-                st.session_state["extracted_json_data"] = extracted_data
-                        
-                # Safely look for the extracted date inside your dictionary or Pydantic model
-                # Adjust this line depending on whether extracted_data is a dict or a Pydantic model
-                report_date = "unknown_date"
-                if isinstance(extracted_data, dict):
-                    report_date = extracted_data.get("database_vitals", {}).get("date", "unknown_date")
+            if processed_record["decision"] == "REJECTED":
+                print(processed_record["recommended_action"])
+            else:
+                if data_manager.save_record(processed_record):
+                    print(f"Report processed and saved. Decision: {processed_record['decision']}")
                 else:
-                    # If it's a Pydantic object
-                    report_date = getattr(getattr(extracted_data, "database_vitals", None), "date", "unknown_date")
-        
-                # Serialize the data to a clean string format
-                if isinstance(extracted_data, dict):
-                    json_string = json.dumps(extracted_data, indent=2, ensure_ascii=False)
-                else:
-                    json_string = json.dumps(extracted_data.model_dump(), indent=2, ensure_ascii=False)
-        
-                # Provide the Download Button safely linked to the extracted report date name
-                st.download_button(
-                    label="💾 Download JSON File",
-                    data=json_string,
-                    file_name=f"report_{report_date}.json",
-                    mime="application/json"
-                )
+                    print("Report was processed but could not be saved. Please try again.")
 
-
-                # Display your structured payload visually in the dashboard
-                st.json(extracted_data)
-            except Exception as e:
-                st.error(f"An error occurred during extraction: {e}")
-
-
-
-    
-
-    if st.button("Back to Dashboard"):
-        st.session_state.page = "dashboard"
-        st.rerun()
+        #st.write(processed_record["summary"])
+        #st.json(processed_record["metrics"])
+    finally:
+        # --- GUARANTEED TO RUN AT THE VERY BOTTOM OF THE PAGE ---
+        st.divider()
+        if st.button("⬅️ Back to Dashboard"):
+            st.session_state.page = "dashboard"
+            st.rerun()
+   
 
 
 

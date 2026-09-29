@@ -1,0 +1,21 @@
+{
+  "database_vitals": {
+    "date": "2026-10-05",
+    "blood_pressure": "116/74",
+    "heart_rate": 68,
+    "blood_glucose": "5.0 mmol/L"
+  },
+  "patient_summary": "Hello Michael, your recent annual physical results are excellent, with all your vital signs and blood sugar levels within the normal range. Dr. Kapoor noted that everything looks healthy, so you can continue with your current wellness routine.",
+  "action_items": [
+    {
+      "topic": "Vitals",
+      "criticality": "Low",
+      "message": "Your blood pressure and heart rate are healthy; keep up the good work with your current lifestyle."
+    },
+    {
+      "topic": "Follow-up",
+      "criticality": "Low",
+      "message": "No immediate actions are needed, but remember to schedule your next annual physical in a year."
+    }
+  ]
+}
