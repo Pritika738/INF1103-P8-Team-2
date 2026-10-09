@@ -145,7 +145,6 @@ RECENT_CHANGE_TOLERANCES = {
 }
 
 
-
 # 1.1 Schema for summary
 class TrendMetric(BaseModel):
     metric: str = Field(description="The health metric being tracked (e.g., Blood Pressure, Heart Rate)")
@@ -154,34 +153,25 @@ class TrendMetric(BaseModel):
 
 # 1.2 Schema for summary
 class TrendAnalysis(BaseModel):
+    date: str = Field(description="Today's date formatted as YYYY-MM-DD")
     overall_health_trajectory: str = Field(description="A 3-4 sentence high-level overview of how the patient is progressing across all reports.")
     key_areas_of_concern: List[str] = Field(description="Bullet points of specific metrics or symptoms that need immediate medical review.")
     tracked_trends: List[TrendMetric] = Field(description="A list breakdown of each individual vital sign's trend trajectory.")
 
-# 2.1 Schema for data extraction
-class VitalsReading(BaseModel):
+
+# 2.2 Schema for data extraction
+class MedicalAnalysis(BaseModel):
+    # Saving vitals in report
     date: str = Field(description="The date of the report or reading formatted as YYYY-MM-DD")
     blood_pressure: Optional[str] = Field(None, description="The blood pressure reading, e.g., '140/80'")
     heart_rate: Optional[int] = Field(None, description="The pulse/heart rate value as an integer bpm")
     blood_glucose: Optional[str] = Field(None, description="The blood glucose value if present, otherwise null")
 
-# 2.2 Schema for data extraction
-class PatientAlert(BaseModel):
-    topic: str = Field(description="The category of the alert (e.g., Medication, Vitals, Follow-up)")
-    criticality: str = Field(description="Severity indicator: 'High', 'Medium', or 'Low'")
-    message: str = Field(description="Clear, actionable advice on what the patient needs to watch out for or do")
-
-# 2.3 Schema for data extraction
-class ComprehensiveMedicalAnalysis(BaseModel):
-    # For your database
-    database_vitals: VitalsReading = Field(description="Cleaned numeric and structured health metrics for DB storage")
-    
-    # For your user interface
+    # Generate a summary
     patient_summary: str = Field(description="A friendly, clear 2-3 sentence overview of the medical report written directly to the patient.")
-    action_items: List[PatientAlert] = Field(description="Important flags, medications to continue, or next steps the user must remember.")
 
 
-def process_vitals_extraction(file_bytes: bytes, mime_type: str) -> VitalsReading:
+def process_vitals_extraction(file_bytes: bytes, mime_type: str):
     print("extracting... ")
     
     prompt_text = PROMPT_TEMPLATES.get("extract", "Extract data fields cleanly.")
@@ -191,13 +181,13 @@ def process_vitals_extraction(file_bytes: bytes, mime_type: str) -> VitalsReadin
         file_bytes=file_bytes,
         mime_type=mime_type,
         prompt=prompt_text,     # Prompt from PROMPT_TEMPLATE for easy edit
-        schema=VitalsReading     # Injected dynamic typing reference
+        schema=MedicalAnalysis     # Injected dynamic typing reference
     )
 
     # Return the response
-    return VitalsReading.model_validate_json(raw_json)
+    return raw_json
 
-def process_summary_report() -> TrendAnalysis:
+def process_summary_report():
     all_reports = []
 
     # Read all saved JSON report files in DATA_DIR
@@ -225,36 +215,34 @@ def process_summary_report() -> TrendAnalysis:
         schema=TrendAnalysis
     )
 
-    # Return the validated Python object
-    return TrendAnalysis.model_validate_json(raw_json)
+    # Return AI response
+    return raw_json
 
 def save_analysis_by_report_date(analysis_data , reporttype:str) -> str:
     """
     Saves the validated Pydantic model payload as a clean JSON file,
     naming it after the extracted report date.
     """
+    print("Saving...")
+
     # Ensure the destination folder exists safely
     os.makedirs(DATA_DIR, exist_ok=True)
     
     # Extract the date from the json file
-    # If the date field is empty or missing, fallback cleanly to avoid a crash
-    report_date = None
-    if analysis_data.database_vitals:
-        report_date = getattr(analysis_data.database_vitals, "date", None)
-        
-    if not report_date:
-        from datetime import datetime
-        report_date = f"unknown_date_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
+    data_dict = json.loads(analysis_data)
+    report_date = data_dict["date"]
+    
     # Remove characters that are illegal in file names and replace to '_'
-    safe_filename = str(report_date).replace("/", "-").replace(" ", "_")
+    safe_filename = report_date.replace("/", "-").replace(" ", "_")
     file_path = os.path.join(DATA_DIR, f"{reporttype}_{safe_filename}.json")
     
     # Save the json file as 'report_{date}.json'
     with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(analysis_data.model_dump(), f, indent=2, ensure_ascii=False)
+        json.dump(data_dict, f, indent=2, ensure_ascii=False)
         
     return file_path
+
+
 
 def flatten_ai_metrics(ai_extracted: Optional[Dict[str, Any]]) -> Dict[str, Optional[float]]:
     """
@@ -590,42 +578,4 @@ def process_ai_record(
     }
 
 
-# ==========================================
-# DUMMY TEST SCRIPT (Local Execution Only)
-# ==========================================
-if __name__ == "__main__":
-    import json
 
-    # A fresh reading shaped exactly like ai_manager.call_ai_with_retry()
-    # actually returns it (nested blood_pressure) - matches the
-    # "severe" tier of the mock test reports used elsewhere in this
-    # project, so this doubles as an integration sanity check.
-    mock_ai_extracted = {
-        "heart_rate": 138,
-        "blood_pressure": {"systolic": 188, "diastolic": 122},
-        "blood_glucose": 15.4,
-    }
-
-    # Historical records use the flat key names data_manager actually
-    # stores (see config.SUPPORTED_METRICS), sorted oldest to newest,
-    # with a rising trend leading up to today's reading.
-    mock_history = [
-        {
-            "date": "2026-07-01",
-            "blood_pressure_systolic": 132,
-            "blood_pressure_diastolic": 85,
-            "blood_glucose": 6.6,
-            "heart_rate": 104,
-        },
-        {
-            "date": "2026-08-01",
-            "blood_pressure_systolic": 148,
-            "blood_pressure_diastolic": 96,
-            "blood_glucose": 9.2,
-            "heart_rate": 118,
-        },
-    ]
-
-    print("--- Simulating an urgent + persistent-trend reading ---")
-    result = process_ai_record(mock_ai_extracted, mock_history)
-    print(json.dumps(result, indent=4))

@@ -1,6 +1,5 @@
 import streamlit as st
 import json
-from logic_manager import process_vitals_extraction, process_summary_report, save_analysis_by_report_date
 import pandas as pd
 import io_manager
 import logic_manager
@@ -144,24 +143,23 @@ def show_upload():
                     file_bytes = uploaded_file.read()
                     
                     # Hand control right over to the Logic Layer
-                    extracted_data = process_vitals_extraction(
+                    extracted_data= logic_manager.process_vitals_extraction(
                         file_bytes=file_bytes, 
                         mime_type=uploaded_file.type
                     )
-
-                    print(f"Extracted data: {extracted_data}")
-
                     historical_records = data_manager.load_health_records()
                     processed_record = logic_manager.process_ai_record(
                         extracted_data, historical_records
                     )
 
                     print(processed_record)
+                    print(f"\nExtracted data: {extracted_data}\n")
+                    print(f"\nExtracted datatype: {type(extracted_data)}\n")
+                    
 
-                    print("json file saved.")
                     # Save the file into your "./data" directory automatically named after the report date
-                    #saved_disk_path = save_analysis_by_report_date(extracted_data, "report")
-                    #print(f"Extraction Complete! File archived on server at: {saved_disk_path}")
+                    saved_disk_path = logic_manager.save_analysis_by_report_date(extracted_data, "report")
+                    print(f"Extraction Complete! File archived on server at: {saved_disk_path}")
                     
                     # Cache the resulting object in session state so it survives the download trigger
                     st.session_state["extracted_json_data"] = extracted_data
@@ -176,11 +174,8 @@ def show_upload():
                         report_date = getattr(getattr(extracted_data, "database_vitals", None), "date", "unknown_date")
             
                     # Serialize the data to a clean string format
-                    if isinstance(extracted_data, dict):
-                        json_string = json.dumps(extracted_data, indent=2, ensure_ascii=False)
-                    else:
-                        json_string = json.dumps(extracted_data.model_dump(), indent=2, ensure_ascii=False)
-            
+                    json_string = json.dumps(extracted_data, indent=2, ensure_ascii=False)
+                    
                     # Provide the Download Button safely linked to the extracted report date name
                     st.download_button(
                         label="💾 Download JSON File",
@@ -196,13 +191,6 @@ def show_upload():
                     st.error(f"An error occurred during extraction: {e}")
 
 
-            if processed_record["decision"] == "REJECTED":
-                print(processed_record["recommended_action"])
-            else:
-                if data_manager.save_record(processed_record):
-                    print(f"Report processed and saved. Decision: {processed_record['decision']}")
-                else:
-                    print("Report was processed but could not be saved. Please try again.")
 
         #st.write(processed_record["summary"])
         #st.json(processed_record["metrics"])
@@ -274,24 +262,21 @@ def show_trends():
 def show_consultation():
     st.title("Consultation Preparation Report")
 
-    if st.button("Process Report"):
-        with st.spinner("Processing report..."):
+    if st.button("Generate Report"):
+        with st.spinner("Generating Report..."):
             try:
                 # Hand control right over to the Logic Layer
-                extracted_data = process_summary_report()
+                extracted_data = logic_manager.process_summary_report()
                 
                 # Save the file into your "./data" directory automatically named after the report date
-                saved_disk_path = save_analysis_by_report_date(extracted_data, "summary")
+                saved_disk_path = logic_manager.save_analysis_by_report_date(extracted_data, "summary")
                 st.success(f"Summary Complete! File archived on server at: {saved_disk_path}")
                 
                 # Cache the resulting object in session state so it survives the download trigger
                 st.session_state["extracted_json_data"] = extracted_data
         
                 # Serialize the data to a clean string format
-                if isinstance(extracted_data, dict):
-                    json_string = json.dumps(extracted_data, indent=2, ensure_ascii=False)
-                else:
-                    json_string = json.dumps(extracted_data.model_dump(), indent=2, ensure_ascii=False)
+                json_string = json.dumps(extracted_data, indent=2, ensure_ascii=False)
         
                 # Provide the Download Button safely linked to the extracted report date name
                 st.download_button(

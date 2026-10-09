@@ -1,0 +1,26 @@
+{
+  "date": "2026-12-01",
+  "overall_health_trajectory": "The patient's health trajectory is marked by extreme instability, moving from a critical hypertensive crisis in September to a brief period of normalcy in October, before deteriorating again in December. Recent readings show a return to elevated blood pressure and heart rate levels, accompanied by persistent heart palpitations. This cyclical pattern suggests that the patient's condition is not yet stabilized and requires urgent medical intervention to manage recurring cardiovascular stress.",
+  "key_areas_of_concern": [
+    "Recent elevation of blood pressure to 142/92 mmHg and heart rate to 112 bpm.",
+    "Reported heart palpitations following a history of chest discomfort and blurred vision.",
+    "Significant volatility in vital signs, indicating a lack of sustained therapeutic control."
+  ],
+  "tracked_trends": [
+    {
+      "metric": "Blood Pressure",
+      "direction": "Worsening",
+      "observation": "BP spiked to 188/122 in September, normalized in October, but has trended upward again to 142/92 in December."
+    },
+    {
+      "metric": "Heart Rate",
+      "direction": "Worsening",
+      "observation": "Heart rate remains unstable, dropping to 68 bpm in October but rising back to a tachycardic 112 bpm by December."
+    },
+    {
+      "metric": "Blood Glucose",
+      "direction": "Improving",
+      "observation": "Glucose levels showed a dangerous spike to 15.4 mmol/L in September but successfully returned to a normal range of 5.0 mmol/L by October."
+    }
+  ]
+}
