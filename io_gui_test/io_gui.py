@@ -6,7 +6,7 @@ import calendar
 import hashlib
 import hmac
 import secrets
-
+import LogicManagertest, data_manager
 from pathlib import Path
 from datetime import datetime, date
 
@@ -1586,6 +1586,8 @@ def show_upload():
 
         st.write("")
 
+
+
         # -------------------------------------------------
         # VALIDATION
         # -------------------------------------------------
@@ -1706,6 +1708,58 @@ def show_upload():
                         st.success(
                             "Medical report passed input validation."
                         )
+
+                        try:
+                            file_bytes = uploaded_file.read()
+                            
+                            # Hand control right over to the Logic Layer
+                            extracted_data= LogicManagertest.process_vitals_extraction(
+                                file_bytes=file_bytes, 
+                                mime_type=uploaded_file.type
+                            )
+                            historical_records = data_manager.load_health_records()
+                            processed_record = LogicManagertest.process_ai_record(
+                                extracted_data, historical_records
+                            )
+        
+                            print(processed_record)
+                            print(f"\nExtracted data: {extracted_data}\n")
+                            print(f"\nExtracted datatype: {type(extracted_data)}\n")
+                            
+        
+                            # Save the file into your "./data" directory automatically named after the report date
+                            saved_disk_path = LogicManagertest.save_analysis_by_report_date(extracted_data, "report")
+                            print(f"Extraction Complete! File archived on server at: {saved_disk_path}")
+                            
+                            # Cache the resulting object in session state so it survives the download trigger
+                            st.session_state["extracted_json_data"] = extracted_data
+                                    
+                            # Safely look for the extracted date inside your dictionary or Pydantic model
+                            # Adjust this line depending on whether extracted_data is a dict or a Pydantic model
+                            report_date = "unknown_date"
+                            if isinstance(extracted_data, dict):
+                                report_date = extracted_data.get("database_vitals", {}).get("date", "unknown_date")
+                            else:
+                                # If it's a Pydantic object
+                                report_date = getattr(getattr(extracted_data, "database_vitals", None), "date", "unknown_date")
+                    
+                            # Serialize the data to a clean string format
+                            json_string = json.dumps(extracted_data, indent=2, ensure_ascii=False)
+                            
+                            # Provide the Download Button safely linked to the extracted report date name
+                            st.download_button(
+                                label="💾 Download JSON File",
+                                data=json_string,
+                                file_name=f"report_{report_date}.json",
+                                mime="application/json"
+                            )
+        
+        
+                            # Display your structured payload visually in the dashboard
+                            st.json(extracted_data)
+                        except Exception as e:
+                            st.error(f"An error occurred during extraction: {e}")
+        
 
                         if len(validated_pages) > 1:
 

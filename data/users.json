@@ -1,0 +1,8 @@
+{
+    "tester05": {
+        "username": "tester05",
+        "email": "test@test.com",
+        "salt": "d7b7da7953905fcdc9ffd6c493bf40f0",
+        "password_hash": "e395f71d86f99fe0a1b644fed25a9395dd14ba6f2aa34f23707035b9358eeb95"
+    }
+}
