@@ -515,8 +515,8 @@ ALLOWED_FILE_EXTENSIONS = {
     ".jpeg"
 }
 
-MAX_FILE_SIZE_MB = 10
-
+MAX_PDF_SIZE_MB = 30
+MAX_IMAGE_SIZE_MB = 10
 
 def validate_username(username: str) -> str:
 
@@ -793,18 +793,18 @@ def validate_uploaded_report(
 
         return False, "The selected file is empty."
 
-    maximum_bytes = (
-        MAX_FILE_SIZE_MB
-        * 1024
-        * 1024
-    )
+    if extension == ".pdf":
+        maximum_size_mb = MAX_PDF_SIZE_MB
+    else:
+        maximum_size_mb = MAX_IMAGE_SIZE_MB
+
+    maximum_bytes = maximum_size_mb * 1024 * 1024
 
     if len(file_bytes) > maximum_bytes:
-
         return (
             False,
             f"File is too large. Maximum size is "
-            f"{MAX_FILE_SIZE_MB} MB."
+            f"{maximum_size_mb} MB for this file type."
         )
 
     if extension == ".pdf":
@@ -1511,7 +1511,7 @@ def show_upload():
             "Upload one PDF, one image, or multiple image pages "
             "belonging to the same medical report. "
             "Supported formats: PDF, PNG, JPG and JPEG. "
-            "Maximum file size: 10 MB per file."
+            "Maximum size: 30 MB for one PDF and 10 MB per image."
         )
 
         extensions = [
