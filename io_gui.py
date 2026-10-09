@@ -1,7 +1,9 @@
 import streamlit as st
-import json
-from ai_manager import ExtractFields 
+import pandas as pd
+
 import io_manager
+import logic_manager
+import data_manager
 
 # --------------------------------------------------
 # PAGE CONFIGURATION
@@ -74,8 +76,15 @@ def show_dashboard():
 
     st.subheader("User's Profile")
 
-    st.write("**Records Stored:** 0")
-    st.write("**Latest Record:** No records yet")
+    records = data_manager.load_health_records()
+    if records:
+        latest = records[-1]
+        latest_summary = f"{latest.get('date', 'Unknown date')} ({latest.get('decision', 'N/A')})"
+    else:
+        latest_summary = "No records yet"
+
+    st.write(f"**Records Stored:** {len(records)}")
+    st.write(f"**Latest Record:** {latest_summary}")
 
     st.divider()
 
@@ -118,37 +127,32 @@ def show_upload():
     )
     st.caption("Supported: PDF, PNG, JPG/JPEG")
 
-    if uploaded_file is None:
-        return
+    if uploaded_file is not None:
+        if not io_manager.is_supported_upload_type(uploaded_file.type):
+            st.error("Unsupported file type. Please upload a PDF, PNG, or JPG/JPEG file.")
+        else:
+            st.write(f"Selected: {uploaded_file.name}")
 
-    if not io_manager.is_supported_upload_type(uploaded_file.type):
-        st.error("Unsupported file type. Please upload a PDF, PNG, or JPG/JPEG file.")
-        return
+            if st.button("Process Report"):
+                with st.spinner("Processing report..."):
+                    ai_extracted = io_manager.process_uploaded_report(
+                        uploaded_file.getvalue(), uploaded_file.type
+                    )
+                    historical_records = data_manager.load_health_records()
+                    processed_record = logic_manager.process_ai_record(
+                        ai_extracted, historical_records
+                    )
 
+                if processed_record["decision"] == "REJECTED":
+                    st.error(processed_record["recommended_action"])
+                else:
+                    if data_manager.save_record(processed_record):
+                        st.success(f"Report processed and saved. Decision: {processed_record['decision']}")
+                    else:
+                        st.error("Report was processed but could not be saved. Please try again.")
 
-    st.write(f"Selected: {uploaded_file.name}")
-
-    if st.button("Process Report"):
-        with st.spinner("Processing report..."):
-            try:
-                # sends uploaded file into the ai_manager.py 
-                extracted_json = ExtractFields(uploaded_file)
-
-                # Display result in Streamlit UI
-                st.success("Extraction Complete!")
-                st.json(extracted_json)
-
-                # Provide a Download Button for the JSON file (temporary)
-                json_string = json.dumps(extracted_json, indent=2)
-                st.download_button(
-                    label="💾 Download JSON File",
-                    data=json_string,
-                    file_name=f"extracted_{uploaded_file.name}.json",
-                    mime="application/json"
-                )
-            except Exception as e:
-                st.error(f"An error occurred during extraction: {e}")
-
+                    st.write(processed_record["summary"])
+                    st.json(processed_record["metrics"])
 
     if st.button("Back to Dashboard"):
         st.session_state.page = "dashboard"
@@ -158,7 +162,22 @@ def show_upload():
 def show_history():
     st.title("Health History")
 
-    st.write("Health history will go here.")
+    filter_date = st.date_input("Filter by date (optional)", value=None)
+
+    if filter_date is not None:
+        records = data_manager.get_records_by_date(filter_date.isoformat())
+        if not records:
+            st.info(f"No records found for {filter_date.isoformat()}.")
+    else:
+        records = data_manager.load_health_records()
+
+    if not records:
+        st.write("No health records found.")
+    else:
+        for record in records:
+            label = f"{record.get('date', 'Unknown date')} - {record.get('decision', 'N/A')}"
+            with st.expander(label):
+                st.json(record)
 
     if st.button("Back to Dashboard"):
         st.session_state.page = "dashboard"
@@ -168,7 +187,27 @@ def show_history():
 def show_trends():
     st.title("Health Trends")
 
-    st.write("Health trend graphs will go here.")
+    records = data_manager.load_health_records()
+
+    if not records:
+        st.write("No health records yet - upload a report to start tracking trends.")
+    else:
+        chart_rows = []
+        for record in records:
+            # Tolerate both the AI-pipeline shape (a "metrics" sub-dict)
+            # and the flat CLI-entry shape, so older manually-entered
+            # records can still be plotted.
+            metrics = record.get("metrics", record)
+            chart_rows.append({
+                "date": record.get("date", ""),
+                "Heart Rate": metrics.get("heart_rate"),
+                "Systolic BP": metrics.get("blood_pressure_systolic"),
+                "Diastolic BP": metrics.get("blood_pressure_diastolic"),
+                "Blood Glucose": metrics.get("blood_glucose"),
+            })
+
+        chart_data = pd.DataFrame(chart_rows).set_index("date")
+        st.line_chart(chart_data)
 
     if st.button("Back to Dashboard"):
         st.session_state.page = "dashboard"

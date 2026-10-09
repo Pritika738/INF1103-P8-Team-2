@@ -7,6 +7,7 @@ the AI API, and parsing/validating its responses).
 Rules for this module:
 - No business/domain rules here (that belongs in logic_manager.py).
 - No print() or input() calls here - return values/errors to the caller.
+- Procedural only - plain module-level functions, no custom classes.
 
 build_prompt() builds the extraction instructions, and call_ai() sends
 those instructions plus an already-read medical report (PDF/image bytes)
@@ -27,14 +28,11 @@ belongs to logic_manager.py.
 
 import json
 import time
-import streamlit as st
-
-from google.genai import types
 
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
-from config import AI_MODEL_NAME, AI_MAX_RETRIES, BASE_DELAY, get_api_key, ComprehensiveMedicalAnalysis
+from config import AI_MODEL_NAME, AI_MAX_RETRIES, BASE_DELAY, get_api_key
 
 
 def build_prompt():
@@ -84,6 +82,69 @@ def build_prompt():
         "blood_pressure, and blood_glucose."
     )
 
+
+def extract_fields(uploaded_file, prompt, schema):
+    """
+    Upload a file to Gemini's Files API and extract structured data
+    from it directly into `schema`, retrying on a transient "model
+    busy" (503) response.
+
+    This is an alternative extraction path to build_prompt() +
+    call_ai_with_retry(): it uses Gemini's native structured-output
+    feature (response_schema) so Gemini itself enforces the shape,
+    instead of manually prompting for JSON and parsing/validating it
+    by hand. It is not part of the active upload pipeline (see
+    io_manager.process_uploaded_report(), which uses call_ai_with_retry()).
+
+    Args:
+        uploaded_file: a file-like object with a `.type` attribute
+            (e.g. a Streamlit UploadedFile) to send to Gemini.
+        prompt: str - instructions describing what to extract.
+        schema: a Pydantic model class describing the desired output
+            shape.
+
+    Returns:
+        A dict parsed from Gemini's structured JSON response on
+        success. Returns None on failure (the model stayed busy for
+        every retry, or any other API error) instead of raising - the
+        caller never has to wrap this in a try/except.
+    """
+    client = genai.Client(api_key=get_api_key())
+
+    gemini_file = client.files.upload(
+        file=uploaded_file,
+        config=types.UploadFileConfig(mime_type=uploaded_file.type),
+    )
+
+    parsed = None
+    try:
+        for attempt in range(1, AI_MAX_RETRIES + 1):
+            try:
+                response = client.models.generate_content(
+                    model=AI_MODEL_NAME,
+                    contents=[uploaded_file, prompt],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=schema,
+                        temperature=0.1,
+                    ),
+                )
+                parsed = parse_response(response.text)
+                break  # exits the retry loop on a successful response
+            except genai_errors.APIError as exc:
+                model_is_busy = exc.code == 503 or exc.status == "UNAVAILABLE"
+                if model_is_busy and attempt < AI_MAX_RETRIES:
+                    time.sleep(BASE_DELAY)
+                    continue
+                return None
+            except Exception:
+                return None
+    finally:
+        # Always clean up the uploaded file on Gemini's servers, even
+        # if every attempt above failed or raised.
+        client.files.delete(name=gemini_file.name)
+
+    return parsed
 
 def call_ai(file_bytes, mime_type, prompt):
     """
@@ -389,62 +450,3 @@ def call_ai_with_retry(file_bytes, mime_type, prompt, max_retries=AI_MAX_RETRIES
         return parsed
 
     return None
-
-
-
-def ExtractFields(uploadedFile):
-    print("Processing document...")
-
-    client = genai.Client(api_key=get_api_key())
-
-
-    gemini_file = client.files.upload(
-        file=uploadedFile,
-        config=types.UploadFileConfig(mime_type=uploadedFile.type)
-    )
-
-    print("Analyzing report and generating patient dashboard data...")
-    # For loop to keep prompting for response
-    for attempt in range(1, AI_MAX_RETRIES + 1):
-        try:
-            response = client.models.generate_content(
-                model=AI_MODEL_NAME,
-                contents=[
-                    gemini_file, 
-                    "Analyze this medical document. Extract the data fields, compile a patient-friendly summary, and flag all key actionable areas."
-                ],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=ComprehensiveMedicalAnalysis,
-                    temperature=0.1,
-                ),
-            )
-        except Exception as e:
-            err_msg = str(e)
-            print(err_msg)
-            # Check for 503 / High Demand
-            if "503" in err_msg or "UNAVAILABLE" in err_msg:
-                if attempt < AI_MAX_RETRIES:
-                    st.warning(f"Model `{AI_MODEL_NAME}` is busy (503). Retrying in {BASE_DELAY}s (Attempt {attempt}/{AI_MAX_RETRIES})...")
-                    time.sleep(BASE_DELAY)
-                else:
-                    st.warning(f"Model `{AI_MODEL_NAME}` failed after {AI_MAX_RETRIES} attempts due to high demand.")
-                    extraction_error = e
-            else:
-                # Non-503 error (e.g. invalid key, schema error) -> raise immediately
-                raise e
-
-    # 5. Output the clean JSON results
-    print("\n--- Extracted Data ---")
-    print(response.text)
-    extracted_json = json.loads(response.text)
-    
-    # Clean up uploaded file from Gemini storage
-    client.files.delete(name=gemini_file.name)
-    
-    return extracted_json
-
-#main for testing
-if __name__ == "__main__":
-
-    ExtractFields()
