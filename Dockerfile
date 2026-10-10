@@ -19,6 +19,6 @@ EXPOSE 8501
 # --server.headless=true: skips Streamlit's first-run "Welcome" email
 # prompt, which otherwise waits on stdin and blocks the container from
 # ever finishing startup.
-CMD ["streamlit", "run", "io_gui_test/io_gui.py", \
+CMD ["streamlit", "run", "io_gui/io_gui.py", \
      "--server.address=0.0.0.0", "--server.port=8501", \
      "--server.headless=true"]

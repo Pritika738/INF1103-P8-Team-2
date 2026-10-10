@@ -1,48 +1,79 @@
 # AI-Assisted Health History & Consultation Preparation System
 
-INF1103 team project (Team 2). A CLI application that will help users track
-their health measurements over time, use AI to help interpret them, and
-prepare a summary to bring to a doctor's consultation.
-
-This starter version implements the project structure, module boundaries,
-and basic record entry/viewing. AI analysis, trend detection, and PDF
-scanning are not implemented yet - see "Current Development Status" below.
+INF1103 team project (Team 2). A Streamlit application that lets a user
+upload their medical reports (PDF/image), uses Google Gemini to extract
+their health measurements, applies the project's own rule-based logic to
+detect notable trends, and prepares a plain-language summary to bring to a
+doctor's consultation - without ever generating a diagnosis.
 
 ## Folder Structure
 
 ```
-inf1103_p8_team2/
-├── main.py              # Entry point / CLI menu loop
-├── io_manager.py         # All input()/print() operations
-├── ai_manager.py         # AI prompt building, API calls, response parsing (placeholders)
-├── logic_manager.py      # Business rules (placeholders)
-├── data_manager.py       # JSON file persistence
-├── config.py              # Configuration constants
+INF1103-P8-Team-2/
+├── io_gui/
+│   └── io_gui.py          # Streamlit GUI (primary interface) - login,
+│                            dashboard, history, trends, consultation
+├── main.py                 # Legacy CLI entry point / menu loop
+├── io_manager.py           # I/O facade - all input()/print(), and the
+│                            one bridge the GUI/CLI uses to reach ai_manager
+├── ai_manager.py           # Builds the Gemini prompt, calls the API,
+│                            parses/validates the response, verifies every
+│                            extracted value against the source file, and
+│                            retries on failure
+├── logic_manager.py        # Business rules: classification, trend/change
+│                            detection, severity tiers, safety guardrails
+├── data_manager.py         # JSON persistence - health records, archived
+│                            original report files, consultation PDFs
+├── config.py               # Configuration constants (file paths, model
+│                            name, retry limits - no secrets)
 ├── data/
-│   └── health_records.json   # Local JSON "database" of health records
-├── tests/                 # Automated tests (to be added)
-├── .env                    # API key placeholder (not committed with real values)
-├── .gitignore
-├── requirements.txt
+│   ├── health_records.json       # Extracted + validated health records
+│   ├── users.json                 # Login credentials (salted hashes)
+│   ├── original_reports.json      # Metadata for archived report files
+│   ├── original_reports/          # The archived report files themselves
+│   ├── consultation_summaries.json # Metadata for generated summary PDFs
+│   └── consultation_pdfs/          # The generated summary PDFs themselves
+├── tests/
+│   └── test_ai_manager.py  # Automated tests for the AI Manager pipeline
+├── .env                     # Local GEMINI_API_KEY (not committed)
+├── .env.example
+├── .dockerignore
 ├── Dockerfile
+├── requirements.txt
 └── README.md
 ```
 
 ## Architecture
 
+Four procedural manager modules, each with one responsibility, plus the
+Streamlit GUI that drives them. No custom classes - every manager is a
+plain set of functions.
+
 ```
 User
   |
-io_manager.py         (input/output only)
+io_gui/io_gui.py        (Streamlit screens: login, dashboard, upload,
+  |                       history, trends, consultation)
   |
-ai_manager.py          (AI calls - placeholders)
+io_manager.py           (I/O facade: hands an uploaded file to ai_manager,
+  |                       hands a processed record to ai_manager for a
+  |                       narrative summary)
   |
-logic_manager.py       (business rules - placeholders)
+ai_manager.py  <----->  Google Gemini API
+  |                      (build prompt -> call -> parse -> validate ->
+  |                       verify against source file -> retry on failure)
   |
-data_manager.py        (JSON persistence)
+logic_manager.py        (classify readings, detect trends/changes across
+  |                       history, enforce "never diagnose" rules)
   |
-health_records.json
+data_manager.py         (atomic JSON read/write)
+  |
+data/*.json + data/original_reports/ + data/consultation_pdfs/
 ```
+
+The GUI never calls `ai_manager.py` directly for extraction/narrative work -
+it always goes through `io_manager.py`, keeping that boundary enforced in
+code rather than just by convention.
 
 ## Setup Instructions
 
@@ -61,36 +92,67 @@ health_records.json
 
 ## How to Run
 
+### Streamlit GUI (primary interface)
+
 From inside the `INF1103-P8-Team-2/` directory:
+
+```
+streamlit run io_gui/io_gui.py
+```
+
+This opens the app in your browser with login/registration, a dashboard of
+latest readings, a medical report upload flow, full health history (with
+the original files you uploaded kept alongside each record), a multi-axis
+health trends chart, and a consultation-preparation screen with a saved
+summary history.
+
+### Docker
+
+```
+docker build -t health-history-app .
+docker run --rm -p 8501:8501 --env-file .env -v "${PWD}/data:/app/data" health-history-app
+```
+
+Then open `http://localhost:8501`. The volume mount keeps `data/`
+persisted on the host across container restarts; `--env-file .env` passes
+in `GEMINI_API_KEY` at runtime without baking it into the image.
+
+### Legacy CLI
 
 ```
 python main.py
 ```
 
-You will see a menu:
-
-```
-1. Add Health Record
-2. View Health History
-3. Analyse Health Records
-4. Generate Consultation Report
-5. Exit
-```
+A simpler terminal menu (add a record manually, view history). It only
+talks to `io_manager.py`/`data_manager.py` - it does not use the AI
+extraction pipeline or the business-rule engine.
 
 ## Current Development Status
 
 **Functional:**
-- CLI menu loop (`main.py`, `io_manager.py`)
-- Adding a health record and saving it to `data/health_records.json` (`data_manager.py`)
-- Viewing stored health records
-- Loading/saving JSON safely, including handling a missing or corrupted `health_records.json`
+- Streamlit GUI: registration/login, dashboard, medical report upload,
+  health history with original-file archive, multi-axis health trends
+  chart, consultation-preparation screen with saved summary history
+- AI Manager: Gemini-based extraction of heart rate, blood pressure, blood
+  glucose, and the report's own date, with schema validation, source
+  verification (rejecting any value Gemini can't back up against the
+  actual file), and automatic retry
+- Logic Manager: classification of readings, trend/change detection across
+  a user's history (including classification-boundary crossings), two
+  severity tiers (URGENT / FLAGGED), and safety guardrails so AI output is
+  never presented as a diagnosis or treatment suggestion
+- Data Manager: atomic JSON persistence for health records, archived
+  original report files, and generated consultation-summary PDFs
+- Automated tests for the AI Manager pipeline (`tests/test_ai_manager.py`)
+- Dockerfile + `.dockerignore` for containerized deployment
 
-**Placeholders (not yet implemented):**
-- AI-powered analysis of health records (`ai_manager.py`)
-- Health trend detection, medication dosage verification, allergy verification, and report-content selection (`logic_manager.py`)
-- Consultation report generation
-- Scanned PDF report ingestion
+**Known limitation:**
+- The Gemini free tier used during development has a daily request quota.
+  Once exhausted, uploads fail with a message asking for a clearer copy
+  until the quota resets (or a different/billed API key is used) - this is
+  an external API limit, not an application bug.
 
-Planned health measurements: blood pressure (systolic/diastolic), heart rate,
-blood glucose, and cholesterol. Additional planned fields: medication name
-and dosage, allergy information, and record date.
+Tracked health measurements: blood pressure (systolic/diastolic), heart
+rate, and blood glucose (AI-extracted). Cholesterol, medication, and
+allergy fields exist in the legacy CLI's manual entry form but are not
+part of the AI extraction pipeline.

@@ -409,6 +409,62 @@ def build_verification_prompt(parsed_response):
     )
 
 
+_MEASUREMENT_SUPPORTED_FIELDS = {
+    "heart_rate_supported", "blood_pressure_supported", "blood_glucose_supported",
+}
+
+
+def _check_source_verification(file_bytes, mime_type, parsed_response):
+    """
+    Ask Gemini, in a SINGLE call, to re-check the original report and
+    confirm whether each non-null value in `parsed_response` is
+    actually backed by it - the shared mechanics behind verify_source()
+    and call_ai_with_retry()'s more selective date-dropping shortcut,
+    so neither of them makes its own separate verification call.
+
+    Args:
+        file_bytes: bytes - the same medical report file used for
+            extraction.
+        mime_type: str - the file's MIME type (see call_ai()).
+        parsed_response: dict already confirmed by validate_schema() to
+            have the expected shape.
+
+    Returns:
+        A dict like {"heart_rate_supported": True, ...} with one entry
+        per non-null field that was checked (empty if nothing was
+        extracted - trivially nothing to invent). None if the
+        verification call itself failed or returned something unusable
+        - callers should treat None as a failure, the same as any
+        field being False.
+    """
+    fields_to_check = []
+    if parsed_response.get("heart_rate") is not None:
+        fields_to_check.append("heart_rate_supported")
+    if parsed_response.get("blood_pressure") is not None:
+        fields_to_check.append("blood_pressure_supported")
+    if parsed_response.get("blood_glucose") is not None:
+        fields_to_check.append("blood_glucose_supported")
+    if parsed_response.get("report_date") is not None:
+        fields_to_check.append("report_date_supported")
+
+    if not fields_to_check:
+        # Nothing was extracted, so there is nothing that could have
+        # been invented - trivially supported.
+        return {}
+
+    verification_prompt = build_verification_prompt(parsed_response)
+    raw_verification = call_ai(file_bytes, mime_type, verification_prompt)
+    verification = parse_response(raw_verification)
+
+    if not isinstance(verification, dict):
+        return None
+
+    return {
+        field_name: verification.get(field_name) is True
+        for field_name in fields_to_check
+    }
+
+
 def verify_source(file_bytes, mime_type, parsed_response):
     """
     Ask Gemini to re-check the original report and confirm that every
@@ -433,29 +489,10 @@ def verify_source(file_bytes, mime_type, parsed_response):
         unusable - callers should treat False the same as any other
         validation failure.
     """
-    fields_to_check = []
-    if parsed_response.get("heart_rate") is not None:
-        fields_to_check.append("heart_rate_supported")
-    if parsed_response.get("blood_pressure") is not None:
-        fields_to_check.append("blood_pressure_supported")
-    if parsed_response.get("blood_glucose") is not None:
-        fields_to_check.append("blood_glucose_supported")
-    if parsed_response.get("report_date") is not None:
-        fields_to_check.append("report_date_supported")
-
-    if not fields_to_check:
-        # Nothing was extracted, so there is nothing that could have
-        # been invented - trivially supported.
-        return True
-
-    verification_prompt = build_verification_prompt(parsed_response)
-    raw_verification = call_ai(file_bytes, mime_type, verification_prompt)
-    verification = parse_response(raw_verification)
-
-    if not isinstance(verification, dict):
+    results = _check_source_verification(file_bytes, mime_type, parsed_response)
+    if results is None:
         return False
-
-    return all(verification.get(field_name) is True for field_name in fields_to_check)
+    return all(results.values())
 
 
 def call_ai_with_retry(file_bytes, mime_type, prompt, max_retries=AI_MAX_RETRIES):
@@ -474,7 +511,15 @@ def call_ai_with_retry(file_bytes, mime_type, prompt, max_retries=AI_MAX_RETRIES
     An attempt that fails any of these three checks (including a
     network/API failure from call_ai(), which comes back as an error
     JSON object that fails validate_schema()) is discarded and the loop
-    tries again, up to `max_retries` times total.
+    tries again, up to `max_retries` times total - WITH ONE EXCEPTION:
+    if every extracted MEASUREMENT is confirmed but report_date alone
+    could not be re-confirmed, this does not throw away an otherwise-
+    trustworthy extraction and spend two more API calls retrying from
+    scratch (one call was already spent confirming the measurements are
+    genuine). It accepts the result with report_date set to None
+    instead - a date that merely couldn't be double-checked is not
+    evidence it was invented, unlike a measurement failing the same
+    check, which still triggers a full retry.
 
     Args:
         file_bytes: bytes - the raw content of the medical report file.
@@ -495,10 +540,29 @@ def call_ai_with_retry(file_bytes, mime_type, prompt, max_retries=AI_MAX_RETRIES
         if not validate_schema(parsed):
             continue
 
-        if not verify_source(file_bytes, mime_type, parsed):
+        # One verification call per attempt, not one per field and not
+        # one per fallback check - verify_source() is not called here
+        # separately, since that would mean a second, duplicate API
+        # call for the exact same check.
+        results = _check_source_verification(file_bytes, mime_type, parsed)
+        if results is None:
             continue
 
-        return parsed
+        if all(results.values()):
+            return parsed
+
+        measurement_results = {
+            field: value for field, value in results.items()
+            if field in _MEASUREMENT_SUPPORTED_FIELDS
+        }
+        date_was_the_only_problem = (
+            results.get("report_date_supported") is False
+            and all(measurement_results.values())
+        )
+        if date_was_the_only_problem:
+            parsed_without_date = dict(parsed)
+            parsed_without_date["report_date"] = None
+            return parsed_without_date
 
     return None
 

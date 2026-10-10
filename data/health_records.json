@@ -55,7 +55,7 @@
     "requires_doctor_review": true,
     "summary": "Urgent: Systolic Blood Pressure, Diastolic Blood Pressure, Blood Glucose, Heart Rate at a level that usually warrants prompt medical attention | Please discuss these results with your doctor at your next consultation.",
     "username": "test",
-    "date": "2026-01-01",
+    "date": "2026-10-10",
     "record_id": "4c3f71465ec14fb1a945b8eaba67c73a"
   },
   {
@@ -210,5 +210,181 @@
     "username": "test",
     "date": "2026-01-01",
     "record_id": "fbd2100be26e40768e09a3d82248477f"
+  },
+  {
+    "metrics": {
+      "heart_rate": 54,
+      "blood_pressure_systolic": 98,
+      "blood_pressure_diastolic": 62,
+      "blood_glucose": 4.6
+    },
+    "ai_extracted_date": "2026-10-03",
+    "urgent_findings": [],
+    "flagged_trends": [],
+    "recent_changes": [
+      {
+        "metric": "Systolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "classification_changed": true,
+        "previous_classification": "ELEVATED",
+        "current_classification": "NORMAL",
+        "feedback": "Your systolic blood pressure has changed from elevated (152) to normal (98) since your last record."
+      },
+      {
+        "metric": "Diastolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "classification_changed": true,
+        "previous_classification": "ELEVATED",
+        "current_classification": "NORMAL",
+        "feedback": "Your diastolic blood pressure has changed from elevated (98) to normal (62) since your last record."
+      },
+      {
+        "metric": "Blood Glucose",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "classification_changed": true,
+        "previous_classification": "ELEVATED",
+        "current_classification": "NORMAL",
+        "feedback": "Your blood glucose has changed from elevated (8.2) to normal (4.6) since your last record."
+      },
+      {
+        "metric": "Heart Rate",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "classification_changed": true,
+        "previous_classification": "ELEVATED",
+        "current_classification": "NORMAL",
+        "feedback": "Your heart rate has changed from elevated (104) to normal (54) since your last record."
+      }
+    ],
+    "risk_score": 0,
+    "decision": "ACCEPTED",
+    "recommended_action": "No action needed - keep up with regular check-ups.",
+    "requires_doctor_review": false,
+    "summary": "Please discuss these results with your doctor at your next consultation.",
+    "username": "test",
+    "date": "2026-10-03",
+    "report_id": "dd761a248a3c45be835e432f8de8408a",
+    "record_id": "6783b42c4c344105bcbdcf945af3ab0e"
+  },
+  {
+    "metrics": {
+      "heart_rate": 68,
+      "blood_pressure_systolic": 116,
+      "blood_pressure_diastolic": 74,
+      "blood_glucose": 4.8
+    },
+    "ai_extracted_date": "2026-10-06",
+    "urgent_findings": [],
+    "flagged_trends": [],
+    "recent_changes": [
+      {
+        "metric": "Systolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "classification_changed": false,
+        "previous_classification": "NORMAL",
+        "current_classification": "NORMAL",
+        "feedback": "Your systolic blood pressure has increased from 98 to 116 since your last record (worsened - moved further from the typical reference range)."
+      },
+      {
+        "metric": "Diastolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "classification_changed": false,
+        "previous_classification": "NORMAL",
+        "current_classification": "NORMAL",
+        "feedback": "Your diastolic blood pressure has increased from 62 to 74 since your last record (worsened - moved further from the typical reference range)."
+      },
+      {
+        "metric": "Heart Rate",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "classification_changed": false,
+        "previous_classification": "NORMAL",
+        "current_classification": "NORMAL",
+        "feedback": "Your heart rate has increased from 54 to 68 since your last record (worsened - moved further from the typical reference range)."
+      }
+    ],
+    "risk_score": 0,
+    "decision": "ACCEPTED",
+    "recommended_action": "No action needed - keep up with regular check-ups.",
+    "requires_doctor_review": false,
+    "summary": "Increased since last visit: Systolic Blood Pressure, Diastolic Blood Pressure, Heart Rate | Please discuss these results with your doctor at your next consultation.",
+    "username": "test",
+    "date": "2026-10-06",
+    "report_id": "6d78084ec0ca499a969a321d9271b0bc",
+    "record_id": "cd4903de2d3d483ea264a9702ad2f274"
+  },
+  {
+    "metrics": {
+      "heart_rate": 88,
+      "blood_pressure_systolic": 134,
+      "blood_pressure_diastolic": 86,
+      "blood_glucose": 6.3
+    },
+    "ai_extracted_date": "2026-08-05",
+    "urgent_findings": [],
+    "flagged_trends": [
+      {
+        "metric": "Systolic Blood Pressure",
+        "status": "FLAGGED",
+        "reason": "Systolic Blood Pressure (134) is elevated and has been rising for three consecutive readings."
+      },
+      {
+        "metric": "Diastolic Blood Pressure",
+        "status": "FLAGGED",
+        "reason": "Diastolic Blood Pressure (86) is elevated and has been rising for three consecutive readings."
+      }
+    ],
+    "recent_changes": [
+      {
+        "metric": "Systolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "classification_changed": true,
+        "previous_classification": "NORMAL",
+        "current_classification": "ELEVATED",
+        "feedback": "Your systolic blood pressure has changed from normal (116) to elevated (134) since your last record."
+      },
+      {
+        "metric": "Diastolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "classification_changed": true,
+        "previous_classification": "NORMAL",
+        "current_classification": "ELEVATED",
+        "feedback": "Your diastolic blood pressure has changed from normal (74) to elevated (86) since your last record."
+      },
+      {
+        "metric": "Blood Glucose",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "classification_changed": false,
+        "previous_classification": "NORMAL",
+        "current_classification": "NORMAL",
+        "feedback": "Your blood glucose has increased from 4.8 to 6.3 since your last record (worsened - moved further from the typical reference range)."
+      },
+      {
+        "metric": "Heart Rate",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "classification_changed": false,
+        "previous_classification": "NORMAL",
+        "current_classification": "NORMAL",
+        "feedback": "Your heart rate has increased from 68 to 88 since your last record (worsened - moved further from the typical reference range)."
+      }
+    ],
+    "risk_score": 2,
+    "decision": "FLAGGED",
+    "recommended_action": "Discuss these trends with your doctor at your next consultation.",
+    "requires_doctor_review": true,
+    "summary": "Persistent upward trend detected in: Systolic Blood Pressure, Diastolic Blood Pressure | Increased since last visit: Blood Glucose, Heart Rate | Please discuss these results with your doctor at your next consultation.",
+    "username": "test",
+    "date": "2026-08-05",
+    "report_id": "2545abc41f1447f4a5f40e6f9e7023fc",
+    "record_id": "298e86c43f9d416eb540afdc0c54126d"
   }
 ]

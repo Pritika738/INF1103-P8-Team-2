@@ -12,22 +12,24 @@ Account Details [Login] - Username, Password, Email
 Past medical records - Scanned and uploaded into a database as a PDF/image with AI used to extract relevant health information (heart rate [BPM], blood pressure [systolic/diastolic], blood glucose)
 
 ### Use of AI
-AI will be used to analyse the user's current and historical health measurements (heart rate, blood pressure, and blood glucose) from their scanned medical reports to identify trends and unusual changes over time.
+AI (Google Gemini) is used to read an uploaded medical report (PDF/image) and extract the user's health measurements (heart rate, blood pressure, blood glucose) and the report's own date, returning a structured JSON response.
 
-The AI will generate a structured JSON response identifying patterns such as increasing or decreasing trends, stable measurements, and significant changes. It can also highlight readings that may require the user's attention or further review by a healthcare professional.
+Every extracted value is re-checked against the original file itself (source verification) before it is trusted - if Gemini cannot confirm a value is actually supported by the document, that value is rejected rather than stored. The AI is only ever asked to read what is in the document; it is never asked to judge whether a reading is good, bad, or trending, and it never outputs a diagnosis.
 
-These AI-generated results will then be displayed on the dashboard and the consultation-preparation report.
+Trend and change detection (increasing/decreasing patterns, stable measurements, significant changes) is handled separately by the application's own rule-based logic, not by the AI - this keeps "no diagnosing" guaranteed by design rather than by the AI's good behaviour. AI is used a second time, after those rules have already run, only to turn the results into a plain-language consultation summary for the user - it still cannot introduce a diagnosis or treatment suggestion at that stage, since it is only explaining findings the rules already decided.
+
+These results (the extracted measurements, the rule-based findings, and the AI-written plain-language summary) are then displayed on the dashboard, Health History, Health Trends, and the consultation-preparation report.
 
 ### Business Rules
 Input Validation (io_manager): The system will verify that uploaded medical documents are in a supported format and contain processable information before sending them for AI analysis.
 
 Targeted Metric Validation (ai_manager): AI-generated output must follow a predefined JSON structure and may only contain the three health metrics tracked by the application (Blood Pressure, Blood Glucose, and Heart Rate). Missing, malformed, or unsupported values will be rejected or flagged for verification.
 
-Trend Detection (logic_manager): New measurements will be compared with the user's historical records. Persistent increases, decreases, or significant changes across multiple readings will be flagged as notable trends for the user.
+Trend Detection (logic_manager): New measurements are compared against the user's most recent historical records. Persistent increases, decreases, or significant changes across multiple readings - including a reading crossing from one severity level into another even without a large numeric change - are flagged as notable trends. Findings are classified into two severity tiers: URGENT (readings at a level that usually warrants prompt medical attention) and FLAGGED (a persistent trend worth discussing but not immediately urgent).
 
 Safety Rules (logic_manager): AI-generated outputs will not provide medical diagnoses, prescribe treatment, or recommend medication changes. Findings will instead be presented as informational observations and, where appropriate, users will be advised to discuss notable trends with a healthcare professional.
 
-Data Storage and Record Management (data_manager): Only AI-extracted health measurements that pass the application's validation rules will be stored in the user's health history. Each record will be associated with the relevant date to preserve chronological history. For the prototype, records will be stored using JSON/flat-file storage, while the data_manager will keep storage operations separate from the application's business logic.
+Data Storage and Record Management (data_manager): Only AI-extracted health measurements that pass the application's validation rules will be stored in the user's health history. Each record will be associated with the relevant date (the report's own date where the AI could confirm it, otherwise editable by the user) to preserve chronological history. The original uploaded report file is also kept on file, linked to its extracted record, so the source document can be revisited later. Generated consultation-preparation summaries are stored separately as their own PDF history. For the prototype, all of this is stored using JSON/flat-file storage, while the data_manager keeps storage operations separate from the application's business logic.
 
 ### GitHub Repository
 * Repository URL: https://github.com/Pritika738/INF1103-P8-Team-2.git
