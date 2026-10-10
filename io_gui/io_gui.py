@@ -13,7 +13,7 @@ from datetime import datetime, date
 import pandas as pd
 import altair as alt
 
-# This file lives in io_gui_test/, one directory below the four manager
+# This file lives in io_gui/, one directory below the four manager
 # modules (io_manager.py, ai_manager.py, logic_manager.py, data_manager.py).
 # Streamlit inserts this file's own directory into sys.path, not the
 # project root, so "import io_manager" etc. would fail without this.
@@ -800,6 +800,82 @@ def build_multi_axis_trend_chart(records):
         .properties(title="Health Trends - Multiple Y-Axes", height=380)
         .interactive()
     )
+
+
+def _format_report_date(raw_date):
+    """
+    Turn a stored "YYYY-MM-DD" date string into a readable display
+    format ("09 Oct 2026"). Never invents a date: anything missing or
+    unparseable becomes the literal string "Date Unavailable" - not
+    "01 Jan 2026" or today's date.
+
+    Args:
+        raw_date: str or None - a record's stored "date" field.
+
+    Returns:
+        A display string: either "DD Mon YYYY" or "Date Unavailable".
+    """
+    if not raw_date:
+        return "Date Unavailable"
+    try:
+        return datetime.strptime(raw_date, "%Y-%m-%d").strftime("%d %b %Y")
+    except ValueError:
+        return "Date Unavailable"
+
+
+def _format_measurement(value, unit):
+    """
+    Format one measurement value for display: "—" if missing, otherwise
+    the number (without a pointless trailing ".0" for whole numbers)
+    followed by its unit. Only affects how the value is *shown* - the
+    original stored number is never modified.
+
+    Args:
+        value: number or None.
+        unit: str - e.g. "bpm", "mmHg", "mmol/L".
+
+    Returns:
+        A display string, e.g. "72 bpm", "5.4 mmol/L", or "—".
+    """
+    if value is None:
+        return "—"
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return f"{value} {unit}".strip()
+
+
+def build_readings_table_rows(records):
+    """
+    Build display-ready rows for the readings table shown on both the
+    Health History and Health Trends pages - one row per record, sorted
+    by the record's own report date, NEWEST FIRST. Dates and numbers
+    are formatted for readability here; the underlying stored records
+    (and their raw numeric values) are never modified.
+
+    Args:
+        records: list of record dicts (each with "date" and "metrics").
+
+    Returns:
+        A list of dicts with the keys "Report Date", "Heart Rate",
+        "Systolic BP", "Diastolic BP", and "Blood Glucose", ready to
+        pass straight to st.dataframe()/st.table().
+    """
+    # Sort by the RAW ISO date string first (sorts correctly
+    # chronologically) - sorting after formatting to "09 Oct 2026"
+    # would sort alphabetically by month name instead, which is wrong.
+    sorted_records = sorted(records, key=lambda r: r.get("date") or "", reverse=True)
+
+    rows = []
+    for record in sorted_records:
+        metrics = record.get("metrics", {})
+        rows.append({
+            "Report Date": _format_report_date(record.get("date")),
+            "Heart Rate": _format_measurement(metrics.get("heart_rate"), "bpm"),
+            "Systolic BP": _format_measurement(metrics.get("blood_pressure_systolic"), "mmHg"),
+            "Diastolic BP": _format_measurement(metrics.get("blood_pressure_diastolic"), "mmHg"),
+            "Blood Glucose": _format_measurement(metrics.get("blood_glucose"), "mmol/L"),
+        })
+    return rows
 
 
 def severity_badge(severity):
@@ -2047,28 +2123,26 @@ def show_history():
     trends = build_record_trends(my_records)
 
     st.subheader("All readings")
-    rows = []
-    for r in sorted(my_records, key=lambda r: r.get("date") or ""):
-        metrics = r.get("metrics", {})
-        rows.append({
-            "Date": r.get("date", ""),
-            "Decision": r.get("decision", ""),
-            "Heart Rate (bpm)": metrics.get("heart_rate"),
-            "Systolic (mmHg)": metrics.get("blood_pressure_systolic"),
-            "Diastolic (mmHg)": metrics.get("blood_pressure_diastolic"),
-            "Glucose (mmol/L)": metrics.get("blood_glucose"),
-        })
 
-    decisions = ["All"] + sorted({r["Decision"] for r in rows if r["Decision"]})
+    # Record newest-first by its own report date (not upload order),
+    # with human-readable dates/units/"—" for missing values - see
+    # build_readings_table_rows(). Decision is appended separately so
+    # the outcome filter below still works on the raw rows.
+    sorted_by_date_desc = sorted(my_records, key=lambda r: r.get("date") or "", reverse=True)
+    table_rows = build_readings_table_rows(my_records)
+    for row, record in zip(table_rows, sorted_by_date_desc):
+        row["Outcome"] = record.get("decision", "")
+
+    decisions = ["All"] + sorted({r["Outcome"] for r in table_rows if r["Outcome"]})
     chosen = st.selectbox("Filter by outcome", decisions)
-    view = rows if chosen == "All" else [r for r in rows if r["Decision"] == chosen]
+    view = table_rows if chosen == "All" else [r for r in table_rows if r["Outcome"] == chosen]
     st.dataframe(view, use_container_width=True, hide_index=True)
 
-    csv_lines = ["Date,Decision,Heart Rate,Systolic,Diastolic,Glucose"]
+    csv_lines = ["Report Date,Outcome,Heart Rate,Systolic BP,Diastolic BP,Blood Glucose"]
     for r in view:
         csv_lines.append(",".join(str(r[k]) for k in
-                          ("Date", "Decision", "Heart Rate (bpm)", "Systolic (mmHg)",
-                           "Diastolic (mmHg)", "Glucose (mmol/L)")))
+                          ("Report Date", "Outcome", "Heart Rate", "Systolic BP",
+                           "Diastolic BP", "Blood Glucose")))
     st.download_button("Download history (CSV)",
                        data=chr(10).join(csv_lines).encode("utf-8"),
                        file_name="health_history.csv", mime="text/csv")
@@ -2291,6 +2365,14 @@ def show_trends():
         )
     else:
         st.info("Not enough dated measurements yet to draw a combined chart.")
+
+    st.divider()
+    st.subheader("Measurement table")
+    st.dataframe(
+        build_readings_table_rows(recent_records),
+        use_container_width=True,
+        hide_index=True,
+    )
 
     st.divider()
     st.subheader(

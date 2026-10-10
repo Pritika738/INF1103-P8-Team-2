@@ -10,5 +10,11 @@
         "email": "test@gmail.com",
         "salt": "aca761f56b4d1dd85dc476c7a9fd7956",
         "password_hash": "e7686bb0252b2428ddc988c5528a084a57c471ed57d12d5a4ced7c20670a0ad9"
+    },
+    "test1": {
+        "username": "test1",
+        "email": "test1@gmail.com",
+        "salt": "5ec6a2c7d3d642b552719218298cc7e1",
+        "password_hash": "123f8e12bc429ce84e74e0fe40a95dc9debc392864c49fd899748cd9adb14cb0"
     }
 }
