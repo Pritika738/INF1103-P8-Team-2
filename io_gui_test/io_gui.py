@@ -2,6 +2,7 @@ import streamlit as st
 import json
 import os
 import re
+import sys
 import calendar
 import hashlib
 import hmac
@@ -11,6 +12,16 @@ from pathlib import Path
 from datetime import datetime, date
 
 import pandas as pd
+
+# This file lives in io_gui_test/, one directory below the four manager
+# modules (io_manager.py, ai_manager.py, logic_manager.py, data_manager.py).
+# Streamlit inserts this file's own directory into sys.path, not the
+# project root, so "import io_manager" etc. would fail without this.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import io_manager
+import logic_manager
+import data_manager
 
 st.set_page_config(
     page_title="PASSAY - Health History and Consultation Prep",
@@ -67,11 +78,56 @@ def inject_css():
         @keyframes floaty2 { 0% { transform: translate(0,0) scale(1); } 50% { transform: translate(-34px,30px) scale(1.1); } 100% { transform: translate(0,0) scale(1); } }
         @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
 
+        /* ============================================================
+           THEME TOKENS
+           Defaults below are the DARK theme. The light-mode overrides
+           further down flip these tokens when the user's Streamlit
+           base theme is light (prefers-color-scheme: light).
+           ============================================================ */
+        :root {
+            --app-bg-1: #2a1958;
+            --app-bg-2: #10344a;
+            --app-bg-3a: #0a0e1e;
+            --app-bg-3b: #0e1226;
+            --blob-1: rgba(167,139,250,0.5);
+            --blob-2: rgba(94,234,212,0.4);
+
+            --text-main: #cdd6ee;
+            --text-strong: #f4f6ff;
+            --text-muted: #a6b0d0;
+
+            --surface: rgba(255,255,255,0.05);
+            --surface-2: rgba(255,255,255,0.06);
+            --border: rgba(255,255,255,0.12);
+            --border-soft: rgba(255,255,255,0.09);
+            --border-strong: rgba(255,255,255,0.14);
+            --shadow: rgba(0,0,0,0.4);
+            --shadow-soft: rgba(0,0,0,0.36);
+
+            --input-bg: rgba(255,255,255,0.05);
+            --input-border: rgba(255,255,255,0.14);
+
+            --sidebar-bg: linear-gradient(180deg, #120a2e 0%, #131a38 60%, #16224a 130%);
+            --sidebar-border: rgba(255,255,255,0.06);
+
+            --accent: #a78bfa;
+            --accent-2: #5eead4;
+            --accent-ring: rgba(167,139,250,0.22);
+            --accent-glow: rgba(167,139,250,0.3);
+
+            --hero-grad: linear-gradient(115deg,#2a1958 0%,#6d28d9 50%,#0e7490 120%);
+            --hero-shadow: rgba(109,40,217,0.42);
+            --on-hero: #ffffff;
+            --on-hero-soft: rgba(255,255,255,0.9);
+
+            --metric-bg: rgba(255,255,255,0.05);
+        }
+
         .stApp {
             background:
-              radial-gradient(1000px 600px at 8% -5%, #2a1958 0%, transparent 55%),
-              radial-gradient(900px 600px at 100% 0%, #10344a 0%, transparent 55%),
-              linear-gradient(180deg, #0a0e1e 0%, #0e1226 100%);
+              radial-gradient(1000px 600px at 8% -5%, var(--app-bg-1) 0%, transparent 55%),
+              radial-gradient(900px 600px at 100% 0%, var(--app-bg-2) 0%, transparent 55%),
+              linear-gradient(180deg, var(--app-bg-3a) 0%, var(--app-bg-3b) 100%);
             overflow-x: hidden;
         }
         .stApp:before, .stApp:after {
@@ -79,12 +135,12 @@ def inject_css():
         }
         .stApp:before {
             width: 560px; height: 560px;
-            background: radial-gradient(circle at 30% 30%, rgba(167,139,250,0.5), transparent 70%);
+            background: radial-gradient(circle at 30% 30%, var(--blob-1), transparent 70%);
             top: -140px; left: -100px; animation: floaty 18s ease-in-out infinite;
         }
         .stApp:after {
             width: 500px; height: 500px;
-            background: radial-gradient(circle at 60% 40%, rgba(94,234,212,0.4), transparent 70%);
+            background: radial-gradient(circle at 60% 40%, var(--blob-2), transparent 70%);
             bottom: -160px; right: -80px; animation: floaty2 22s ease-in-out infinite;
         }
         section.main .block-container { position: relative; z-index: 1; }
@@ -128,32 +184,32 @@ def inject_css():
         .block-container { padding-top: 2rem; max-width: 1150px; }
 
         .stApp, .stApp p, .stApp span, .stApp label, .stApp li,
-        .main .block-container { color: #cdd6ee !important; }
-        .stApp h1, .stApp h2, .stApp h3, .stApp h4 { color: #f4f6ff !important; font-weight: 700 !important; }
+        .main .block-container { color: var(--text-main) !important; }
+        .stApp h1, .stApp h2, .stApp h3, .stApp h4 { color: var(--text-strong) !important; font-weight: 700 !important; }
 
         .stTextInput input, .stNumberInput input, .stDateInput input,
         div[data-baseweb="input"] input, textarea, div[data-baseweb="select"] > div {
-            background-color: rgba(255,255,255,0.05) !important;
-            color: #f4f6ff !important;
-            border: 1.5px solid rgba(255,255,255,0.14) !important;
+            background-color: var(--input-bg) !important;
+            color: var(--text-strong) !important;
+            border: 1.5px solid var(--input-border) !important;
             border-radius: 16px !important;
             transition: border-color 0.25s ease, box-shadow 0.25s ease !important;
         }
         .stTextInput input:focus, div[data-baseweb="input"]:focus-within {
-            border-color: #a78bfa !important;
-            box-shadow: 0 0 0 4px rgba(167,139,250,0.22) !important;
+            border-color: var(--accent) !important;
+            box-shadow: 0 0 0 4px var(--accent-ring) !important;
         }
         .stTextInput label, .stSelectbox label, .stNumberInput label {
-            color: #a6b0d0 !important; font-weight: 700 !important; font-size: 0.82rem !important;
+            color: var(--text-muted) !important; font-weight: 700 !important; font-size: 0.82rem !important;
         }
 
         div[data-testid="stVerticalBlockBorderWrapper"] {
-            background: rgba(255,255,255,0.05) !important;
+            background: var(--surface) !important;
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
-            border: 1.5px solid rgba(255,255,255,0.12) !important;
+            border: 1.5px solid var(--border) !important;
             border-radius: 26px !important;
-            box-shadow: 0 16px 50px rgba(0,0,0,0.4) !important;
+            box-shadow: 0 16px 50px var(--shadow) !important;
             transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.3s ease, border-color 0.3s ease;
         }
         div[data-testid="stVerticalBlockBorderWrapper"]:hover {
@@ -163,14 +219,14 @@ def inject_css():
         }
 
         section[data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #120a2e 0%, #131a38 60%, #16224a 130%);
-            border-right: 1px solid rgba(255,255,255,0.06);
+            background: var(--sidebar-bg);
+            border-right: 1px solid var(--sidebar-border);
         }
-        section[data-testid="stSidebar"] * { color: #cdd6ee !important; }
+        section[data-testid="stSidebar"] * { color: var(--text-main) !important; }
         section[data-testid="stSidebar"] .stButton > button {
-            background: rgba(255,255,255,0.05);
-            border: 1.5px solid rgba(255,255,255,0.09);
-            color: #eef1ff !important;
+            background: var(--surface);
+            border: 1.5px solid var(--border-soft);
+            color: var(--text-strong) !important;
             border-radius: 16px;
             text-align: left;
             font-weight: 700;
@@ -181,21 +237,21 @@ def inject_css():
             background: rgba(167,139,250,0.2);
             border-color: rgba(167,139,250,0.55);
             transform: translateX(6px) scale(1.02);
-            box-shadow: 0 0 20px rgba(167,139,250,0.3);
+            box-shadow: 0 0 20px var(--accent-glow);
         }
 
         .stButton > button {
             border-radius: 16px;
-            border: 1.5px solid rgba(255,255,255,0.14);
+            border: 1.5px solid var(--border-strong);
             padding: 0.6rem 1.15rem;
             font-weight: 700;
-            background: rgba(255,255,255,0.06);
-            color: #eef1ff !important;
+            background: var(--surface-2);
+            color: var(--text-strong) !important;
             transition: all 0.25s cubic-bezier(0.34,1.56,0.64,1);
         }
         .stButton > button:hover {
-            border-color: #a78bfa;
-            color: #ffffff !important;
+            border-color: var(--accent);
+            color: var(--text-strong) !important;
             transform: translateY(-2px) scale(1.02);
             box-shadow: 0 12px 28px rgba(167,139,250,0.34);
         }
@@ -215,11 +271,11 @@ def inject_css():
         }
 
         div[data-testid="stMetric"] {
-            background: rgba(255,255,255,0.05);
-            border: 1.5px solid rgba(255,255,255,0.12);
+            background: var(--metric-bg);
+            border: 1.5px solid var(--border);
             border-radius: 24px;
             padding: 18px 20px;
-            box-shadow: 0 14px 40px rgba(0,0,0,0.36);
+            box-shadow: 0 14px 40px var(--shadow-soft);
             transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.3s ease, border-color 0.3s ease;
         }
         div[data-testid="stMetric"]:hover {
@@ -227,11 +283,11 @@ def inject_css():
             border-color: rgba(167,139,250,0.5);
             box-shadow: 0 24px 54px rgba(167,139,250,0.26);
         }
-        div[data-testid="stMetricValue"] { color: #f4f6ff !important; font-weight: 800; font-family: 'Baloo 2'; }
-        div[data-testid="stMetricLabel"] { color: #a6b0d0 !important; font-weight: 700; }
+        div[data-testid="stMetricValue"] { color: var(--text-strong) !important; font-weight: 800; font-family: 'Baloo 2'; }
+        div[data-testid="stMetricLabel"] { color: var(--text-muted) !important; font-weight: 700; }
 
-        hr { margin: 1rem 0; border: none; border-top: 1px solid rgba(255,255,255,0.08); }
-        div[data-testid="stDataFrame"] { border-radius: 18px; overflow: hidden; box-shadow: 0 8px 26px rgba(0,0,0,0.36); }
+        hr { margin: 1rem 0; border: none; border-top: 1px solid var(--border-soft); }
+        div[data-testid="stDataFrame"] { border-radius: 18px; overflow: hidden; box-shadow: 0 8px 26px var(--shadow-soft); }
 
         .vt-hero { animation: springIn 0.6s cubic-bezier(0.34,1.56,0.64,1) both; }
         .vt-badge { animation: fadeIn 0.7s ease both; }
@@ -251,6 +307,74 @@ def inject_css():
             opacity: 1 !important;
             pointer-events: auto !important;
         }
+
+        /* ============================================================
+           LIGHT MODE OVERRIDES
+           When the user's Streamlit base theme is "light", Streamlit
+           sets the OS/app colour scheme so prefers-color-scheme: light
+           matches. We re-map every theme token to a bright palette
+           that keeps the same purple/teal brand identity but on a
+           soft, readable light background.
+           ============================================================ */
+        @media (prefers-color-scheme: light) {
+            :root {
+                --app-bg-1: #ede9fe;
+                --app-bg-2: #cffafe;
+                --app-bg-3a: #f7f8ff;
+                --app-bg-3b: #eef1fb;
+                --blob-1: rgba(167,139,250,0.35);
+                --blob-2: rgba(45,212,191,0.28);
+
+                --text-main: #3b3f58;
+                --text-strong: #1e2140;
+                --text-muted: #6b7290;
+
+                --surface: rgba(255,255,255,0.75);
+                --surface-2: rgba(255,255,255,0.85);
+                --border: rgba(30,33,64,0.10);
+                --border-soft: rgba(30,33,64,0.08);
+                --border-strong: rgba(30,33,64,0.12);
+                --shadow: rgba(79,70,139,0.14);
+                --shadow-soft: rgba(79,70,139,0.12);
+
+                --input-bg: rgba(255,255,255,0.9);
+                --input-border: rgba(30,33,64,0.14);
+
+                --sidebar-bg: linear-gradient(180deg, #f3eefe 0%, #eaf0fb 60%, #e4f3f6 130%);
+                --sidebar-border: rgba(30,33,64,0.08);
+
+                --accent: #7c3aed;
+                --accent-2: #0d9488;
+                --accent-ring: rgba(124,58,237,0.18);
+                --accent-glow: rgba(124,58,237,0.22);
+
+                --hero-grad: linear-gradient(115deg,#8b5cf6 0%,#7c3aed 50%,#0e7490 120%);
+                --hero-shadow: rgba(124,58,237,0.28);
+                --on-hero: #ffffff;
+                --on-hero-soft: rgba(255,255,255,0.92);
+
+                --metric-bg: rgba(255,255,255,0.8);
+            }
+
+            /* Card hover accents read better slightly stronger on light */
+            div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+                border-color: rgba(124,58,237,0.5) !important;
+                box-shadow: 0 28px 62px rgba(124,58,237,0.18) !important;
+            }
+            section[data-testid="stSidebar"] .stButton > button:hover {
+                background: rgba(124,58,237,0.12);
+                border-color: rgba(124,58,237,0.4);
+            }
+            .stButton > button:hover {
+                box-shadow: 0 12px 28px rgba(124,58,237,0.22);
+            }
+            div[data-testid="stMetric"]:hover {
+                border-color: rgba(124,58,237,0.45);
+                box-shadow: 0 24px 54px rgba(124,58,237,0.18);
+            }
+            /* Primary button text stays dark on the bright gradient */
+            button[kind="primary"] { color: #1e1240 !important; }
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -259,32 +383,32 @@ def inject_css():
 def hero(title, subtitle=""):
     sub = ""
     if subtitle:
-        sub = ("<div style='color:rgba(255,255,255,0.9);font-size:1.05rem;margin-top:6px;"
+        sub = ("<div style='color:var(--on-hero-soft);font-size:1.05rem;margin-top:6px;"
                "font-weight:600;'>" + subtitle + "</div>")
     st.markdown(
-        "<div class='vt-hero' style='background:linear-gradient(115deg,#2a1958 0%,#6d28d9 50%,#0e7490 120%);"
+        "<div class='vt-hero' style='background:var(--hero-grad);"
         "padding:34px 38px;border-radius:32px;margin-bottom:24px;"
-        "box-shadow:0 24px 60px rgba(109,40,217,0.42);position:relative;overflow:hidden;"
+        "box-shadow:0 24px 60px var(--hero-shadow);position:relative;overflow:hidden;"
         "border:1.5px solid rgba(255,255,255,0.14);'>"
         "<div style='position:absolute;right:-30px;top:-30px;width:200px;height:200px;"
         "background:rgba(255,255,255,0.12);border-radius:50%;'></div>"
         "<div style='position:absolute;right:100px;bottom:-70px;width:140px;height:140px;"
         "background:rgba(94,234,212,0.22);border-radius:50%;'></div>"
-        "<div style='color:#ffffff;font-size:2.1rem;font-weight:800;font-family:Baloo 2;position:relative;'>"
+        "<div style='color:var(--on-hero);font-size:2.1rem;font-weight:800;font-family:Baloo 2;position:relative;'>"
         + title + "</div>" + sub + "</div>",
         unsafe_allow_html=True,
     )
 
 def stat_tile(label, value, color):
     st.markdown(
-        "<div style='background:rgba(255,255,255,0.05);border:1.5px solid rgba(255,255,255,0.12);"
-        "border-radius:24px;padding:20px 22px;box-shadow:0 14px 40px rgba(0,0,0,0.36);"
+        "<div style='background:var(--surface);border:1.5px solid var(--border);"
+        "border-radius:24px;padding:20px 22px;box-shadow:0 14px 40px var(--shadow-soft);"
         "position:relative;overflow:hidden;'>"
         "<div style='position:absolute;right:-16px;top:-16px;width:74px;height:74px;"
         "border-radius:50%;background:" + color + "40;filter:blur(4px);'></div>"
-        "<div style='font-size:2.1rem;font-weight:800;color:#f4f6ff;line-height:1;font-family:Baloo 2;'>"
+        "<div style='font-size:2.1rem;font-weight:800;color:var(--text-strong);line-height:1;font-family:Baloo 2;'>"
         + str(value) + "</div>"
-        "<div style='color:#a6b0d0;font-size:0.85rem;font-weight:700;margin-top:8px;'>" + label + "</div></div>",
+        "<div style='color:var(--text-muted);font-size:0.85rem;font-weight:700;margin-top:8px;'>" + label + "</div></div>",
         unsafe_allow_html=True,
     )
 
@@ -430,6 +554,114 @@ SEVERITY_STYLE = {
     "important": {"color": "#fda4af", "bg": "rgba(253,164,175,0.15)", "label": "Review"},
 }
 
+# Maps logic_manager's "decision" values onto this GUI's existing
+# three-level severity badge, so no severity is ever recomputed here -
+# it is read straight from what Logic Manager already decided when the
+# record was saved.
+DECISION_SEVERITY = {
+    "ACCEPTED": "info",
+    "FLAGGED": "watch",
+    "URGENT": "important",
+}
+
+METRIC_UNITS = {
+    "heart_rate": "bpm",
+    "blood_pressure_systolic": "mmHg",
+    "blood_pressure_diastolic": "mmHg",
+    "blood_glucose": "mmol/L",
+}
+
+
+def records_for_current_user(records):
+    """
+    Filter Data Manager records down to the signed-in user's own
+    records, the same way records_for_user() does for the old
+    metric/value/unit records above - records saved before per-user
+    tagging existed (no "username" key on any record) are shown to
+    everyone rather than hidden.
+    """
+    user = current_user()
+    if not user:
+        return records
+    tagged = [r for r in records if "username" in r]
+    if not tagged:
+        return records
+    return [r for r in records if r.get("username") == user]
+
+
+def build_record_trends(records):
+    """
+    Group Data Manager records (the shape logic_manager.process_ai_record()
+    returns) by metric, for the History/Trends/Consultation screens to
+    chart - without recomputing any business rule. Each point's
+    severity comes straight from that record's own "decision" (already
+    decided by logic_manager.py when the record was saved), and the
+    direction/note for the latest point comes from that record's own
+    "recent_changes" (also already decided by logic_manager.py) rather
+    than being worked out again here.
+
+    Args:
+        records: list of dicts from data_manager.load_health_records(),
+            already filtered to one user if relevant.
+
+    Returns:
+        A list of dicts: {"metric", "unit", "values", "dates", "latest",
+        "direction", "severity", "note"} - one per metric that has at
+        least one non-null reading, sorted oldest reading first.
+    """
+    by_metric = {}
+
+    for record in sorted(records, key=lambda r: r.get("date") or ""):
+        metrics = record.get("metrics", {})
+        decision = record.get("decision", "ACCEPTED")
+        severity = DECISION_SEVERITY.get(decision, "info")
+        recent_changes_by_metric = {
+            change["metric"]: change["feedback"]
+            for change in record.get("recent_changes", [])
+        }
+
+        for metric_key, value in metrics.items():
+            if value is None:
+                continue
+            label = logic_manager.METRIC_LABELS.get(metric_key, metric_key)
+            by_metric.setdefault(metric_key, {"label": label, "points": []})
+            by_metric[metric_key]["points"].append({
+                "date": record.get("date"),
+                "value": value,
+                "severity": severity,
+                "feedback": recent_changes_by_metric.get(label),
+            })
+
+    trends = []
+    for metric_key, info in by_metric.items():
+        points = info["points"]
+        values = [p["value"] for p in points]
+        dates = [p["date"] for p in points]
+        latest_point = points[-1]
+
+        if latest_point["feedback"]:
+            note = latest_point["feedback"]
+            direction = "rising" if "increased" in note else "falling"
+        elif len(values) >= 2:
+            note = f"{len(values)} readings recorded; no significant change since the last visit."
+            direction = "stable"
+        else:
+            note = "Only one reading available - not enough to show a trend."
+            direction = "unknown"
+
+        trends.append({
+            "metric": info["label"],
+            "unit": METRIC_UNITS.get(metric_key, ""),
+            "values": values,
+            "dates": dates,
+            "latest": latest_point["value"],
+            "direction": direction,
+            "severity": latest_point["severity"],
+            "note": note,
+        })
+
+    return trends
+
 def severity_badge(severity):
     s = SEVERITY_STYLE.get(severity, SEVERITY_STYLE["info"])
     return ("<span class='vt-badge' style='background:" + s["bg"] + ";color:" + s["color"]
@@ -458,13 +690,13 @@ def sidebar_nav():
             initial = name[0].upper()
             st.markdown(
                 "<div style='display:flex;align-items:center;gap:10px;"
-                "background:rgba(255,255,255,0.06);border:1.5px solid rgba(255,255,255,0.12);"
+                "background:var(--surface-2);border:1.5px solid var(--border);"
                 "border-radius:18px;padding:10px 12px;margin:10px 0 16px 0;'>"
                 "<div style='width:40px;height:40px;border-radius:50%;background:"
                 "linear-gradient(135deg,#a78bfa,#5eead4);display:flex;align-items:center;"
                 "justify-content:center;font-weight:800;color:#17123a;box-shadow:0 0 18px rgba(167,139,250,0.55);'>"
                 + initial + "</div>"
-                "<div><div style='font-weight:800;font-size:0.95rem;color:#f4f6ff;'>" + name + "</div>"
+                "<div><div style='font-weight:800;font-size:0.95rem;color:var(--text-strong);'>" + name + "</div>"
                 "<div style='font-size:0.72rem;opacity:0.6;'>Signed in</div></div></div>",
                 unsafe_allow_html=True,
             )
@@ -706,41 +938,6 @@ def create_temporary_account(
         "Account created successfully."
     )
 
-    username = username.strip()
-    email = email.strip().lower()
-
-    username_key = username.lower()
-
-    accounts = load_accounts()
-
-    if username_key in accounts:
-        return False, "That username is already taken."
-
-    for account in accounts.values():
-
-        if account["email"].lower() == email:
-
-            return (
-                False,
-                "An account already exists with this email address."
-            )
-
-    salt = secrets.token_hex(16)
-
-    accounts[username_key] = {
-        "username": username,
-        "email": email,
-        "salt": salt,
-        "password_hash": hash_password(
-            password,
-            salt
-        )
-    }
-
-    save_accounts(accounts)
-
-    return True, "Account created successfully."
-
 def authenticate_temporary_account(
     username: str,
     password: str
@@ -844,222 +1041,6 @@ def validate_uploaded_report(
     return True, ""
 
 
-# =========================================================
-# INPUT VALIDATION
-# =========================================================
-
-USERNAME_PATTERN = re.compile(
-    r"^[A-Za-z0-9_.-]{3,30}$"
-)
-
-EMAIL_PATTERN = re.compile(
-    r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
-)
-
-PASSWORD_ITERATIONS = 200_000
-
-ALLOWED_FILE_EXTENSIONS = {
-    ".pdf",
-    ".png",
-    ".jpg",
-    ".jpeg"
-}
-
-MAX_FILE_SIZE_MB = 10
-
-
-def validate_username(username: str) -> str:
-
-    username = username.strip()
-
-    if not username:
-        return "Please enter a username."
-
-    if not USERNAME_PATTERN.fullmatch(username):
-        return (
-            "Username must be 3–30 characters and may only "
-            "contain letters, numbers, '.', '_' or '-'."
-        )
-
-    return ""
-
-
-def validate_email(email: str) -> str:
-
-    email = email.strip()
-
-    if not email:
-        return "Please enter an email address."
-
-    if not EMAIL_PATTERN.fullmatch(email):
-        return "Please enter a valid email address."
-
-    return ""
-
-
-def validate_password(password: str) -> str:
-
-    if not password:
-        return "Please enter a password."
-
-    if len(password) < 8:
-        return "Password must contain at least 8 characters."
-
-    if not any(character.isupper() for character in password):
-        return "Password must contain at least one uppercase letter."
-
-    if not any(character.islower() for character in password):
-        return "Password must contain at least one lowercase letter."
-
-    if not any(character.isdigit() for character in password):
-        return "Password must contain at least one number."
-
-    if not any(
-        not character.isalnum()
-        for character in password
-    ):
-        return "Password must contain at least one special character."
-
-    return ""
-
-
-def hash_password(
-    password: str,
-    salt_hex: str
-) -> str:
-
-    salt = bytes.fromhex(salt_hex)
-
-    hashed_password = hashlib.pbkdf2_hmac(
-        "sha256",
-        password.encode("utf-8"),
-        salt,
-        PASSWORD_ITERATIONS
-    )
-
-    return hashed_password.hex()
-
-
-def create_temporary_account(
-    username: str,
-    email: str,
-    password: str
-) -> tuple[bool, str]:
-
-    username = username.strip()
-    email = email.strip().lower()
-
-    username_key = username.lower()
-
-    accounts = load_accounts()
-
-    if username_key in accounts:
-        return False, "That username is already taken."
-
-    for account in accounts.values():
-
-        if account["email"].lower() == email:
-
-            return (
-                False,
-                "An account already exists with this email address."
-            )
-
-    salt = secrets.token_hex(16)
-
-    accounts[username_key] = {
-        "username": username,
-        "email": email,
-        "salt": salt,
-        "password_hash": hash_password(
-            password,
-            salt
-        )
-    }
-
-    save_accounts(accounts)
-
-    return True, "Account created successfully."
-
-
-def validate_uploaded_report(
-    uploaded_file
-) -> tuple[bool, str]:
-
-    if uploaded_file is None:
-
-        return False, "Please select a medical report."
-
-    extension = (
-        Path(uploaded_file.name)
-        .suffix
-        .lower()
-    )
-
-    if extension not in ALLOWED_FILE_EXTENSIONS:
-
-        return (
-            False,
-            "Unsupported file format. "
-            "Please upload PDF, PNG, JPG or JPEG."
-        )
-
-    file_bytes = uploaded_file.getvalue()
-
-    if len(file_bytes) == 0:
-
-        return False, "The selected file is empty."
-
-    maximum_bytes = (
-        MAX_FILE_SIZE_MB
-        * 1024
-        * 1024
-    )
-
-    if len(file_bytes) > maximum_bytes:
-
-        return (
-            False,
-            f"File is too large. Maximum size is "
-            f"{MAX_FILE_SIZE_MB} MB."
-        )
-
-    if extension == ".pdf":
-
-        if not file_bytes.startswith(b"%PDF-"):
-
-            return (
-                False,
-                "This file does not appear to be a valid PDF."
-            )
-
-    elif extension == ".png":
-
-        if not file_bytes.startswith(
-            b"\x89PNG\r\n\x1a\n"
-        ):
-
-            return (
-                False,
-                "This file does not appear to be a valid PNG image."
-            )
-
-    elif extension in {
-        ".jpg",
-        ".jpeg"
-    }:
-
-        if not file_bytes.startswith(
-            b"\xff\xd8\xff"
-        ):
-
-            return (
-                False,
-                "This file does not appear to be a valid JPEG image."
-            )
-
-    return True, ""
-
 def show_login():
 
     left, mid, right = st.columns([1, 1.4, 1])
@@ -1075,7 +1056,7 @@ def show_login():
             "-webkit-text-fill-color:transparent;'>"
             "PASSAY"
             "</h1>"
-            "<p style='color:#a6b0d0;'>"
+            "<p style='color:var(--text-muted);'>"
             "Track your health over time and prepare for your next appointment."
             "</p>"
             "</div>",
@@ -1169,7 +1150,7 @@ def show_register():
             "-webkit-text-fill-color:transparent;'>"
             "Create Account"
             "</h1>"
-            "<p style='color:#a6b0d0;'>"
+            "<p style='color:var(--text-muted);'>"
             "Create your secure PASSAY profile."
             "</p>"
             "</div>",
@@ -1290,14 +1271,9 @@ def show_dashboard():
     name = display_name()
     hero("Dashboard", ("Welcome back, " + name + "!") if name else "Your health overview")
 
-    records = load_records()
-    good, errors = clean_records(records)
-    if errors:
-        with st.expander(str(len(errors)) + " record(s) had problems and were skipped"):
-            for e in errors:
-                st.markdown("- " + e)
-
-    my_records = records_for_user(good, current_user())
+    # Loaded through the Data Manager - never read the JSON file here.
+    all_records = data_manager.load_health_records()
+    my_records = records_for_current_user(all_records)
 
     if not my_records:
         with st.container(border=True):
@@ -1311,7 +1287,7 @@ def show_dashboard():
                 go("upload")
         return
 
-    trends = build_trends(my_records)
+    trends = build_record_trends(my_records)
     flagged = [t for t in trends if t["severity"] in ("watch", "important")]
 
     c1, c2, c3 = st.columns(3)
@@ -1331,9 +1307,9 @@ def show_dashboard():
                 st.markdown("*" + t["metric"] + "*")
                 st.caption(t["note"])
             with cols[1]:
-                st.markdown("<div style='font-size:1.4rem;font-weight:800;color:#f4f6ff;font-family:Baloo 2;'>"
+                st.markdown("<div style='font-size:1.4rem;font-weight:800;color:var(--text-strong);font-family:Baloo 2;'>"
                             + str(t["latest"]) + " <span style='font-size:0.8rem;font-weight:600;"
-                            "color:#a6b0d0;'>" + t["unit"] + "</span></div>", unsafe_allow_html=True)
+                            "color:var(--text-muted);'>" + t["unit"] + "</span></div>", unsafe_allow_html=True)
             with cols[2]:
                 st.markdown(severity_badge(t["severity"]), unsafe_allow_html=True)
 
@@ -1434,8 +1410,6 @@ def show_upload():
             # -------------------------
             # DAY
             # -------------------------
-
-            import calendar
 
             days_in_month = calendar.monthrange(
                 selected_year,
@@ -1771,22 +1745,100 @@ def show_upload():
                         else:
 
                             st.info(
-                                "The report is ready for AI analysis. "
-                                "AI extraction will be connected when "
-                                "the AI Manager is integrated."
+                                "The report is ready for AI analysis."
                             )
+
+    # -------------------------------------------------
+    # AI / LOGIC / DATA MANAGER PIPELINE
+    # -------------------------------------------------
+    # Only shown once a report has passed input validation above.
+    # This block never talks to Gemini directly, never applies
+    # business-rule thresholds itself, and never writes JSON itself -
+    # it only calls into io_manager -> ai_manager -> logic_manager ->
+    # data_manager, exactly as the architecture requires.
+
+    validated = st.session_state.get("validated_report")
+
+    if validated:
+
+        st.write("")
+
+        with st.container(border=True):
+
+            st.subheader("AI Analysis")
+
+            first_page = validated["pages"][0]
+
+            st.caption(
+                f"Ready to analyse: {first_page['name']}"
+                + (
+                    f" (plus {len(validated['pages']) - 1} more page(s) - "
+                    "only the first page is sent for AI analysis today)"
+                    if len(validated["pages"]) > 1
+                    else ""
+                )
+            )
+
+            if st.button(
+                "Analyze with AI",
+                type="primary",
+                use_container_width=True,
+            ):
+
+                with st.spinner("Sending report to the AI Manager..."):
+                    ai_extracted = io_manager.process_uploaded_report(
+                        first_page["bytes"], first_page["mime_type"]
+                    )
+
+                    all_records = data_manager.load_health_records()
+                    user_records = records_for_current_user(all_records)
+
+                    processed_record = logic_manager.process_ai_record(
+                        ai_extracted, user_records
+                    )
+
+                if processed_record["decision"] == "REJECTED":
+
+                    st.error(processed_record["recommended_action"])
+
+                else:
+
+                    record_to_save = dict(processed_record)
+                    record_to_save["username"] = current_user()
+
+                    # Use the report's own date if the user gave an
+                    # exact one, so history/trends plot it against
+                    # when the report was actually taken - not today.
+                    if validated["date_precision"] == "exact" and validated["date"]:
+                        record_to_save["date"] = validated["date"]
+
+                    saved = data_manager.save_record(record_to_save)
+
+                    if not saved:
+                        st.error(
+                            "The report was processed but could not be "
+                            "saved. Please try again."
+                        )
+                    else:
+                        severity = DECISION_SEVERITY.get(
+                            processed_record["decision"], "info"
+                        )
+                        st.markdown(
+                            severity_badge(severity), unsafe_allow_html=True
+                        )
+                        st.success("Report processed and saved.")
+                        st.write(processed_record["summary"])
+                        st.json(processed_record["metrics"])
+
+                        del st.session_state["validated_report"]
+
 
 def show_history():
     hero("Health History", "Every reading you have recorded, over time")
 
-    records = load_records()
-    good, errors = clean_records(records)
-    if errors:
-        with st.expander(str(len(errors)) + " record(s) had problems and were skipped"):
-            for e in errors:
-                st.markdown("- " + e)
-
-    my_records = records_for_user(good, current_user())
+    # Loaded through the Data Manager - never read the JSON file here.
+    all_records = data_manager.load_health_records()
+    my_records = records_for_current_user(all_records)
 
     if not my_records:
         with st.container(border=True):
@@ -1794,26 +1846,31 @@ def show_history():
             st.write("Once you add records, they appear here as a table and trend charts.")
         return
 
-    trends = build_trends(my_records)
+    trends = build_record_trends(my_records)
 
     st.subheader("All readings")
     rows = []
-    for r in sorted(my_records, key=lambda x: x["date"]):
+    for r in sorted(my_records, key=lambda r: r.get("date") or ""):
+        metrics = r.get("metrics", {})
         rows.append({
-            "Date": r["date"].isoformat(),
-            "Metric": r["metric"],
-            "Value": r["value"],
-            "Unit": r["unit"],
+            "Date": r.get("date", ""),
+            "Decision": r.get("decision", ""),
+            "Heart Rate (bpm)": metrics.get("heart_rate"),
+            "Systolic (mmHg)": metrics.get("blood_pressure_systolic"),
+            "Diastolic (mmHg)": metrics.get("blood_pressure_diastolic"),
+            "Glucose (mmol/L)": metrics.get("blood_glucose"),
         })
 
-    metrics = ["All metrics"] + sorted({r["Metric"] for r in rows})
-    chosen = st.selectbox("Filter by metric", metrics)
-    view = rows if chosen == "All metrics" else [r for r in rows if r["Metric"] == chosen]
+    decisions = ["All"] + sorted({r["Decision"] for r in rows if r["Decision"]})
+    chosen = st.selectbox("Filter by outcome", decisions)
+    view = rows if chosen == "All" else [r for r in rows if r["Decision"] == chosen]
     st.dataframe(view, use_container_width=True, hide_index=True)
 
-    csv_lines = ["Date,Metric,Value,Unit"]
+    csv_lines = ["Date,Decision,Heart Rate,Systolic,Diastolic,Glucose"]
     for r in view:
-        csv_lines.append(r["Date"] + "," + r["Metric"] + "," + str(r["Value"]) + "," + r["Unit"])
+        csv_lines.append(",".join(str(r[k]) for k in
+                          ("Date", "Decision", "Heart Rate (bpm)", "Systolic (mmHg)",
+                           "Diastolic (mmHg)", "Glucose (mmol/L)")))
     st.download_button("Download history (CSV)",
                        data=chr(10).join(csv_lines).encode("utf-8"),
                        file_name="health_history.csv", mime="text/csv")
@@ -1827,9 +1884,9 @@ def show_history():
                 st.markdown("*" + t["metric"] + "* &nbsp; " + severity_badge(t["severity"]),
                             unsafe_allow_html=True)
             with cols[1]:
-                st.markdown("<div style='text-align:right;font-weight:800;font-size:1.2rem;color:#f4f6ff;'>"
+                st.markdown("<div style='text-align:right;font-weight:800;font-size:1.2rem;color:var(--text-strong);'>"
                             + str(t["latest"]) + " <span style='font-size:0.78rem;font-weight:600;"
-                            "color:#a6b0d0;'>" + t["unit"] + "</span></div>", unsafe_allow_html=True)
+                            "color:var(--text-muted);'>" + t["unit"] + "</span></div>", unsafe_allow_html=True)
             if len(t["values"]) < 2:
                 st.caption("Only one reading (" + str(t["values"][0]) + " " + t["unit"]
                            + ") - a chart needs at least two.")
@@ -1845,33 +1902,9 @@ def show_trends():
         "have changed over time."
     )
 
-    # Load existing records
-    records = load_records()
-
-    # Remove malformed records
-    good, errors = clean_records(
-        records
-    )
-
-    if errors:
-
-        with st.expander(
-            str(len(errors))
-            + " record(s) had problems "
-            + "and were skipped"
-        ):
-
-            for error in errors:
-
-                st.markdown(
-                    "- " + error
-                )
-
-    # Only show current user's records
-    my_records = records_for_user(
-        good,
-        current_user()
-    )
+    # Loaded through the Data Manager - never read the JSON file here.
+    all_records = data_manager.load_health_records()
+    my_records = records_for_current_user(all_records)
 
     # No records yet
     if not my_records:
@@ -1898,43 +1931,20 @@ def show_trends():
 
         return
 
-    # Group records by measurement
-    grouped = {}
-
-    for record in my_records:
-
-        metric = record[
-            "metric"
-        ]
-
-        grouped.setdefault(
-            metric,
-            []
-        ).append(
-            record
-        )
+    # Grouped and classified by logic_manager's own stored evaluation -
+    # not recomputed in this file. See build_record_trends().
+    trends = build_record_trends(my_records)
 
     st.subheader(
         "Measurements over time"
     )
 
     # Make one card/chart for each health metric
-    for metric, items in sorted(
-        grouped.items()
-    ):
-
-        items = sorted(
-            items,
-            key=lambda item: item[
-                "date"
-            ]
-        )
+    for t in sorted(trends, key=lambda t: t["metric"]):
 
         with st.container(
             border=True
         ):
-
-            latest = items[-1]
 
             top_left, top_right = (
                 st.columns(
@@ -1945,11 +1955,11 @@ def show_trends():
             with top_left:
 
                 st.markdown(
-                    f"### {metric}"
+                    f"### {t['metric']}"
                 )
 
                 st.caption(
-                    f"{len(items)} reading(s)"
+                    f"{len(t['values'])} reading(s)"
                 )
 
             with top_right:
@@ -1959,34 +1969,27 @@ def show_trends():
                     "text-align:right;"
                     "font-size:1.45rem;"
                     "font-weight:800;"
-                    "color:#f4f6ff;"
+                    "color:var(--text-strong);"
                     "font-family:Baloo 2;'>"
-                    + str(latest["value"])
+                    + str(t["latest"])
                     + " "
                     + "<span style='"
                     "font-size:0.8rem;"
-                    "color:#a6b0d0;'>"
-                    + latest["unit"]
+                    "color:var(--text-muted);'>"
+                    + t["unit"]
                     + "</span>"
                     + "</div>",
                     unsafe_allow_html=True
                 )
 
             # Need at least two readings for a graph
-            if len(items) >= 2:
+            if len(t["values"]) >= 2:
 
                 chart_data = (
                     pd.DataFrame(
                         {
-                            "Date": [
-                                item["date"]
-                                for item in items
-                            ],
-
-                            metric: [
-                                item["value"]
-                                for item in items
-                            ]
+                            "Date": t["dates"],
+                            t["metric"]: t["values"],
                         }
                     )
                     .set_index(
@@ -2007,25 +2010,20 @@ def show_trends():
                     "display a trend graph."
                 )
 
-            st.caption(
-                "Trend classification such as "
-                "increasing, decreasing, stable or "
-                "significant change will later be "
-                "provided by the Logic Manager."
+            st.markdown(
+                severity_badge(t["severity"]),
+                unsafe_allow_html=True,
             )
+
+            st.caption(t["note"])
 
 def show_consultation():
     who = display_name() or "you"
     hero("Consultation Report", "A summary to bring to your appointment. Not medical advice.")
 
-    records = load_records()
-    good, errors = clean_records(records)
-    if errors:
-        with st.expander(str(len(errors)) + " record(s) had problems and were skipped"):
-            for e in errors:
-                st.markdown("- " + e)
-
-    my_records = records_for_user(good, current_user())
+    # Loaded through the Data Manager - never read the JSON file here.
+    all_records = data_manager.load_health_records()
+    my_records = records_for_current_user(all_records)
 
     if not my_records:
         with st.container(border=True):
@@ -2033,13 +2031,13 @@ def show_consultation():
             st.write("Add some medical records first, then generate your summary here.")
         return
 
-    trends = build_trends(my_records)
+    trends = build_record_trends(my_records)
     report = build_report(who, trends)
 
     with st.container(border=True):
-        st.markdown("<div style='border-bottom:1px solid rgba(255,255,255,0.10);padding-bottom:12px;margin-bottom:8px;'>"
-                    "<div style='font-size:1.5rem;font-weight:800;color:#f4f6ff;font-family:Baloo 2;'>Consultation summary</div>"
-                    "<div style='color:#a6b0d0;font-size:0.9rem;'>For " + who + " on "
+        st.markdown("<div style='border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:8px;'>"
+                    "<div style='font-size:1.5rem;font-weight:800;color:var(--text-strong);font-family:Baloo 2;'>Consultation summary</div>"
+                    "<div style='color:var(--text-muted);font-size:0.9rem;'>For " + who + " on "
                     + date.today().strftime("%d %B %Y") + "</div></div>", unsafe_allow_html=True)
 
         if report["summary"]:
@@ -2051,10 +2049,10 @@ def show_consultation():
             for t in report["trends"]:
                 st.markdown(
                     "<div style='display:flex;justify-content:space-between;align-items:center;"
-                    "padding:10px 14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.09);"
+                    "padding:10px 14px;background:var(--surface);border:1px solid var(--border-soft);"
                     "border-radius:16px;margin-bottom:7px;'>"
-                    "<div><b style='color:#f4f6ff;'>" + t["metric"] + "</b><br>"
-                    "<span style='color:#a6b0d0;font-size:0.85rem;'>" + t["note"] + "</span></div>"
+                    "<div><b style='color:var(--text-strong);'>" + t["metric"] + "</b><br>"
+                    "<span style='color:var(--text-muted);font-size:0.85rem;'>" + t["note"] + "</span></div>"
                     "<div>" + severity_badge(t["severity"]) + "</div></div>",
                     unsafe_allow_html=True,
                 )
