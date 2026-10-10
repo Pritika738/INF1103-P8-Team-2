@@ -381,6 +381,7 @@ _FORBIDDEN_SINGLE_WORDS = ["diagnose", "disease", "prescribe", "treatment"]
 _FORBIDDEN_PHRASES = ["stop taking", "increase dose", "decrease dose"]
 
 
+# Adding Safety Guardrails
 def enforce_safety_guardrails(ai_explanation: str) -> str:
     """
     Check free-text AI-generated explanation text for prohibited
