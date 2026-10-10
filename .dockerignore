@@ -1,0 +1,22 @@
+# Secrets - never baked into the image. Passed in at runtime instead
+# via `docker run --env-file .env`.
+.env
+.env.*
+!.env.example
+
+# User/application data - persisted via a volume mount at runtime
+# (-v "${PWD}/data:/app/data"), not shipped inside the image.
+data/
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Version control / editor / OS noise
+.git/
+.gitignore
+.vscode/
+.idea/
+*.log

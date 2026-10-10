@@ -18,6 +18,30 @@ load_dotenv()
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 HEALTH_RECORDS_FILE = os.path.join(DATA_DIR, "health_records.json")
 
+# Generated consultation-summary PDFs (separate from uploaded medical
+# reports) and the JSON file tracking their metadata.
+CONSULTATION_PDF_DIR = os.path.join(DATA_DIR, "consultation_pdfs")
+CONSULTATION_SUMMARIES_FILE = os.path.join(DATA_DIR, "consultation_summaries.json")
+
+# Original uploaded medical report files (the actual PDF/image the user
+# uploaded, kept verbatim) and the JSON file tracking their metadata -
+# completely separate from both health_records.json (extracted values)
+# and the consultation-summary PDFs above (AI Manager's own output).
+ORIGINAL_REPORTS_DIR = os.path.join(DATA_DIR, "original_reports")
+ORIGINAL_REPORTS_FILE = os.path.join(DATA_DIR, "original_reports.json")
+
+# How many report dates are used for active trend analysis and
+# consultation preparation - older reports stay visible in full in
+# Health History, just excluded from these two calculations.
+LATEST_REPORTS_LIMIT = 5
+
+# How many generated consultation-summary PDFs are kept per user before
+# the oldest is deleted. None means keep all of them - this project does
+# not currently have an agreed reason to cap summary history, unlike
+# LATEST_REPORTS_LIMIT above (which is specifically required). This
+# never deletes medical records either way, only generated summary PDFs.
+MAX_RETAINED_SUMMARY_PDFS = None
+
 # --- AI configuration ---------------------------------------------------
 
 # Name of the Gemini model to use. "gemini-2.5-flash" was retired for new

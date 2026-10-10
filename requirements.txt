@@ -2,3 +2,5 @@ python-dotenv
 google-genai
 pytest
 streamlit
+fpdf2
+pandas

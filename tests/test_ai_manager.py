@@ -39,6 +39,7 @@ VALID_RESPONSE_ALL_NULL = json.dumps({
     "heart_rate": None,
     "blood_pressure": None,
     "blood_glucose": None,
+    "report_date": None,
 })
 
 INVALID_RESPONSE = "Sure, here's the data you asked for: heart rate is 72"
@@ -89,6 +90,7 @@ def test_validate_schema_accepts_fully_valid_response():
         "heart_rate": 72,
         "blood_pressure": {"systolic": 120, "diastolic": 80},
         "blood_glucose": 5.5,
+        "report_date": "2026-10-10",
     }
     assert ai_manager.validate_schema(response) is True
 
@@ -100,6 +102,7 @@ def test_validate_schema_accepts_null_for_genuinely_missing_measurement():
         "heart_rate": 72,
         "blood_pressure": {"systolic": 120, "diastolic": 80},
         "blood_glucose": None,
+        "report_date": "2026-10-10",
     }
     assert ai_manager.validate_schema(response) is True
 
@@ -110,6 +113,7 @@ def test_validate_schema_rejects_completely_missing_key():
     response = {
         "heart_rate": 72,
         "blood_pressure": {"systolic": 120, "diastolic": 80},
+        "report_date": "2026-10-10",
     }
     assert ai_manager.validate_schema(response) is False
 
@@ -119,6 +123,7 @@ def test_validate_schema_rejects_unexpected_extra_key():
         "heart_rate": 72,
         "blood_pressure": {"systolic": 120, "diastolic": 80},
         "blood_glucose": None,
+        "report_date": "2026-10-10",
         "diagnosis": "possible hypertension",
     }
     assert ai_manager.validate_schema(response) is False
@@ -129,12 +134,18 @@ def test_validate_schema_rejects_wrong_type_for_heart_rate():
         "heart_rate": ["72"],
         "blood_pressure": {"systolic": 120, "diastolic": 80},
         "blood_glucose": None,
+        "report_date": "2026-10-10",
     }
     assert ai_manager.validate_schema(response) is False
 
 
 def test_validate_schema_accepts_null_blood_pressure():
-    response = {"heart_rate": 72, "blood_pressure": None, "blood_glucose": 5.5}
+    response = {
+        "heart_rate": 72,
+        "blood_pressure": None,
+        "blood_glucose": 5.5,
+        "report_date": "2026-10-10",
+    }
     assert ai_manager.validate_schema(response) is True
 
 
@@ -143,6 +154,7 @@ def test_validate_schema_rejects_blood_pressure_missing_diastolic():
         "heart_rate": 72,
         "blood_pressure": {"systolic": 120},
         "blood_glucose": None,
+        "report_date": "2026-10-10",
     }
     assert ai_manager.validate_schema(response) is False
 
@@ -150,13 +162,68 @@ def test_validate_schema_rejects_blood_pressure_missing_diastolic():
 def test_validate_schema_rejects_boolean_disguised_as_number():
     # bool is a subclass of int in Python - True/False must not be
     # mistaken for a valid numeric measurement.
-    response = {"heart_rate": True, "blood_pressure": None, "blood_glucose": None}
+    response = {
+        "heart_rate": True,
+        "blood_pressure": None,
+        "blood_glucose": None,
+        "report_date": None,
+    }
     assert ai_manager.validate_schema(response) is False
 
 
 def test_validate_schema_rejects_non_dict_input():
     assert ai_manager.validate_schema(None) is False
     assert ai_manager.validate_schema(["not", "a", "dict"]) is False
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: validate_schema() - report_date specifically
+# ---------------------------------------------------------------------------
+
+def test_validate_schema_accepts_null_report_date():
+    response = {
+        "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
+        "report_date": None,
+    }
+    assert ai_manager.validate_schema(response) is True
+
+
+def test_validate_schema_accepts_well_formed_report_date():
+    response = {
+        "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
+        "report_date": "2026-01-05",
+    }
+    assert ai_manager.validate_schema(response) is True
+
+
+def test_validate_schema_rejects_wrong_format_report_date():
+    # Right idea, wrong format - must be "YYYY-MM-DD", not "DD/MM/YYYY".
+    # Converting between formats is build_prompt()'s job (it instructs
+    # Gemini to always answer in YYYY-MM-DD); validate_schema() only
+    # checks that the answer actually came back in that format.
+    response = {
+        "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
+        "report_date": "05/01/2026",
+    }
+    assert ai_manager.validate_schema(response) is False
+
+
+def test_validate_schema_rejects_impossible_calendar_date():
+    # Shaped correctly (YYYY-MM-DD) but "month 13" isn't a real month -
+    # only an actual parse (not just a format/regex check) catches this.
+    response = {
+        "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
+        "report_date": "2026-13-40",
+    }
+    assert ai_manager.validate_schema(response) is False
+
+
+def test_validate_schema_rejects_non_string_report_date():
+    response = {
+        "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
+        "report_date": 20261010,
+    }
+    assert ai_manager.validate_schema(response) is False
 
 
 # ---------------------------------------------------------------------------
@@ -168,11 +235,13 @@ def test_verify_source_accepts_value_confirmed_by_report():
         "heart_rate": 72,
         "blood_pressure": {"systolic": 120, "diastolic": 80},
         "blood_glucose": None,
+        "report_date": "2026-10-10",
     }
     with patch("ai_manager.call_ai") as mock_call_ai:
         mock_call_ai.return_value = json.dumps({
             "heart_rate_supported": True,
             "blood_pressure_supported": True,
+            "report_date_supported": True,
         })
         assert ai_manager.verify_source(b"fake-bytes", "application/pdf", parsed) is True
 
@@ -180,21 +249,43 @@ def test_verify_source_accepts_value_confirmed_by_report():
 def test_verify_source_rejects_value_not_confirmed_by_report():
     # Simulates the report containing no glucose result, but Gemini
     # extracting one anyway (an "invented" value).
-    parsed = {"heart_rate": None, "blood_pressure": None, "blood_glucose": 5.5}
+    parsed = {
+        "heart_rate": None, "blood_pressure": None, "blood_glucose": 5.5,
+        "report_date": None,
+    }
     with patch("ai_manager.call_ai") as mock_call_ai:
         mock_call_ai.return_value = json.dumps({"blood_glucose_supported": False})
         assert ai_manager.verify_source(b"fake-bytes", "application/pdf", parsed) is False
 
 
+def test_verify_source_rejects_invented_report_date():
+    # Same idea as above, but for a fabricated date instead of a
+    # fabricated measurement - e.g. Gemini guessed a date that isn't
+    # actually printed anywhere in the report.
+    parsed = {
+        "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
+        "report_date": "2026-03-14",
+    }
+    with patch("ai_manager.call_ai") as mock_call_ai:
+        mock_call_ai.return_value = json.dumps({"report_date_supported": False})
+        assert ai_manager.verify_source(b"fake-bytes", "application/pdf", parsed) is False
+
+
 def test_verify_source_skips_the_extra_api_call_when_nothing_was_extracted():
-    all_null = {"heart_rate": None, "blood_pressure": None, "blood_glucose": None}
+    all_null = {
+        "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
+        "report_date": None,
+    }
     with patch("ai_manager.call_ai") as mock_call_ai:
         assert ai_manager.verify_source(b"fake-bytes", "application/pdf", all_null) is True
         mock_call_ai.assert_not_called()
 
 
 def test_verify_source_treats_malformed_verification_reply_as_unsupported():
-    parsed = {"heart_rate": 72, "blood_pressure": None, "blood_glucose": None}
+    parsed = {
+        "heart_rate": 72, "blood_pressure": None, "blood_glucose": None,
+        "report_date": None,
+    }
     with patch("ai_manager.call_ai") as mock_call_ai:
         mock_call_ai.return_value = "not valid json at all"
         assert ai_manager.verify_source(b"fake-bytes", "application/pdf", parsed) is False
@@ -266,7 +357,10 @@ def test_invalid_response_causes_another_attempt():
             b"bytes", "application/pdf", "prompt", max_retries=3
         )
 
-    assert result == {"heart_rate": None, "blood_pressure": None, "blood_glucose": None}
+    assert result == {
+        "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
+        "report_date": None,
+    }
     assert mock_call_ai.call_count == 2
 
 
@@ -311,6 +405,7 @@ def test_invented_value_fails_source_verification_and_exhausts_retries():
         "heart_rate": None,
         "blood_pressure": None,
         "blood_glucose": 5.5,
+        "report_date": None,
     })
     verification_response = json.dumps({"blood_glucose_supported": False})
 
@@ -360,7 +455,10 @@ def test_repeated_calls_do_not_crash_or_corrupt_shared_state():
             except Exception as exc:  # pragma: no cover - this must never happen
                 pytest.fail(f"call_ai_with_retry raised on iteration {i}: {exc}")
 
-        assert result == {"heart_rate": None, "blood_pressure": None, "blood_glucose": None}
+        assert result == {
+            "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
+            "report_date": None,
+        }
 
     assert ai_manager._REQUIRED_TOP_LEVEL_KEYS == original_top_level_keys
     assert ai_manager._REQUIRED_BLOOD_PRESSURE_KEYS == original_bp_keys

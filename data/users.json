@@ -4,5 +4,11 @@
         "email": "test@test.com",
         "salt": "d7b7da7953905fcdc9ffd6c493bf40f0",
         "password_hash": "e395f71d86f99fe0a1b644fed25a9395dd14ba6f2aa34f23707035b9358eeb95"
+    },
+    "test": {
+        "username": "test",
+        "email": "test@gmail.com",
+        "salt": "aca761f56b4d1dd85dc476c7a9fd7956",
+        "password_hash": "e7686bb0252b2428ddc988c5528a084a57c471ed57d12d5a4ced7c20670a0ad9"
     }
 }

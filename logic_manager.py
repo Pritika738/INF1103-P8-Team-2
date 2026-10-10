@@ -40,6 +40,7 @@ JSON-serialisable report dict.
 """
 
 import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 
@@ -94,7 +95,10 @@ TREND_FLAG_THRESHOLDS = {
 }
 
 # Day-to-day deltas within these bounds are normal fluctuation and are
-# NOT reported as a "CHANGED" metric by analyze_recent_changes(). This
+# NOT reported as a "CHANGED" metric by analyze_recent_changes() - UNLESS
+# the classification itself changed (see _metric_classification() and
+# classification_changed below), since even a small numeric move across
+# a threshold boundary is a notable change, not noise. This tolerance
 # has no effect on evaluate_health_metrics(), which uses the thresholds
 # above instead.
 RECENT_CHANGE_TOLERANCES = {
@@ -103,6 +107,28 @@ RECENT_CHANGE_TOLERANCES = {
     "blood_glucose": 0.5,
     "heart_rate": 5,
 }
+
+
+def _metric_classification(metric, value):
+    """
+    Classify a single reading into a severity tier using the existing
+    approved thresholds above - independent of trend history. This is
+    only used to detect when a reading crosses from one classification
+    to another between two visits (e.g. "severe" to "normal"); it is
+    not the same thing as evaluate_health_metrics()'s overall FLAGGED
+    tier, which additionally requires a persistent 3-visit trend.
+
+    Returns "SEVERE" (at/above URGENT_THRESHOLDS), "ELEVATED" (above
+    TREND_FLAG_THRESHOLDS but below URGENT_THRESHOLDS), "NORMAL"
+    (at/below TREND_FLAG_THRESHOLDS), or None if `value` is None.
+    """
+    if value is None:
+        return None
+    if value >= URGENT_THRESHOLDS[metric]:
+        return "SEVERE"
+    if value > TREND_FLAG_THRESHOLDS[metric]:
+        return "ELEVATED"
+    return "NORMAL"
 
 
 def flatten_ai_metrics(ai_extracted: Optional[Dict[str, Any]]) -> Dict[str, Optional[float]]:
@@ -132,6 +158,60 @@ def flatten_ai_metrics(ai_extracted: Optional[Dict[str, Any]]) -> Dict[str, Opti
         "blood_pressure_diastolic": blood_pressure.get("diastolic"),
         "blood_glucose": ai_extracted.get("blood_glucose"),
     }
+
+
+def _extract_report_date(ai_extracted: Optional[Dict[str, Any]]) -> Optional[str]:
+    """
+    Safely read the AI Manager's extracted "report_date" out of the raw
+    extraction dict, if present.
+
+    ai_manager.validate_schema() and verify_source() have already
+    checked this is a genuine, source-backed "YYYY-MM-DD" date (or
+    None) by the time it normally reaches this module - this function
+    re-checks the format defensively anyway, so calling
+    process_ai_record() directly with unvalidated data still can't
+    crash or silently accept a malformed date string. This module never
+    invents a replacement date itself if the result is None - deciding
+    what (if anything) to fall back to is left to the caller.
+
+    Args:
+        ai_extracted: the dict ai_manager.call_ai_with_retry() returned,
+            or None.
+
+    Returns:
+        The "YYYY-MM-DD" string if present and genuinely a valid
+        calendar date, otherwise None.
+    """
+    if not isinstance(ai_extracted, dict):
+        return None
+
+    report_date = ai_extracted.get("report_date")
+    if not isinstance(report_date, str):
+        return None
+
+    try:
+        datetime.strptime(report_date, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+    return report_date
+
+
+def _get_metric_value(record, metric):
+    """
+    Read one metric's value from a historical record, which may be
+    shaped either as a flat CLI-entered record (metric keys directly
+    at the top level - see io_manager.prompt_new_health_record(), still
+    saved via data_manager.add_health_record()) or as a full AI-pipeline
+    processed record (metric keys nested under "metrics" - see
+    data_manager.save_record(), which stores exactly what
+    process_ai_record() below returns). Without this, reading historical
+    records saved by the real AI pipeline silently found nothing, and
+    trend/change detection never fired against real data.
+    """
+    if isinstance(record.get("metrics"), dict):
+        return record["metrics"].get(metric)
+    return record.get(metric)
 
 
 def evaluate_health_metrics(
@@ -189,8 +269,8 @@ def evaluate_health_metrics(
         if current_val <= TREND_FLAG_THRESHOLDS[metric] or len(historical_records) < 2:
             continue
 
-        past_1 = historical_records[-1].get(metric)
-        past_2 = historical_records[-2].get(metric)
+        past_1 = _get_metric_value(historical_records[-1], metric)
+        past_2 = _get_metric_value(historical_records[-2], metric)
 
         if past_1 is not None and past_2 is not None and current_val > past_1 > past_2:
             findings.append({
@@ -222,7 +302,9 @@ def analyze_recent_changes(
 
     Returns:
         A list of change dicts, each with "metric", "status"
-        ("CHANGED"), and "feedback".
+        ("CHANGED"), "assessment" ("improved"/"worsened"),
+        "classification_changed" (bool), "previous_classification",
+        "current_classification", and "feedback".
     """
     changes = []
 
@@ -233,7 +315,7 @@ def analyze_recent_changes(
 
     for metric in TRACKED_METRICS:
         current_val = current_metrics.get(metric)
-        past_val = last_record.get(metric)
+        past_val = _get_metric_value(last_record, metric)
 
         # Explicit None-checks (not truthiness) so a genuine reading of
         # 0 is never mistaken for "no data".
@@ -241,19 +323,49 @@ def analyze_recent_changes(
             continue
 
         delta = current_val - past_val
-        if abs(delta) <= RECENT_CHANGE_TOLERANCES[metric]:
+        past_class = _metric_classification(metric, past_val)
+        current_class = _metric_classification(metric, current_val)
+        classification_changed = past_class != current_class
+
+        # A tiny numeric move is still notable if it crossed a
+        # classification boundary (e.g. 181 -> 179 looks small, but
+        # it's a genuine severe-to-normal transition) - report it even
+        # though it's within the normal-fluctuation tolerance.
+        if abs(delta) <= RECENT_CHANGE_TOLERANCES[metric] and not classification_changed:
             continue  # within normal day-to-day fluctuation
 
         label = METRIC_LABELS[metric]
         direction = "increased" if delta > 0 else "decreased"
+        # All four tracked metrics use "higher is worse" thresholds
+        # (see URGENT_THRESHOLDS/TREND_FLAG_THRESHOLDS above), so a
+        # decrease is always the improving direction here. This labels
+        # the change explicitly as "improved"/"worsened" so a later
+        # summary never has to guess whether a change was good or bad -
+        # it reads this classification instead of inventing one.
+        assessment = "worsened" if delta > 0 else "improved"
+
+        if classification_changed:
+            feedback = (
+                f"Your {label.lower()} has changed from {past_class.lower()} "
+                f"({past_val}) to {current_class.lower()} ({current_val}) "
+                "since your last record."
+            )
+        else:
+            feedback = (
+                f"Your {label.lower()} has {direction} from {past_val} "
+                f"to {current_val} since your last record "
+                f"({assessment} - moved {'further from' if assessment == 'worsened' else 'closer to'} "
+                "the typical reference range)."
+            )
 
         changes.append({
             "metric": label,
             "status": "CHANGED",
-            "feedback": (
-                f"Your {label.lower()} has {direction} from {past_val} "
-                f"to {current_val} since your last record."
-            ),
+            "assessment": assessment,
+            "classification_changed": classification_changed,
+            "previous_classification": past_class,
+            "current_classification": current_class,
+            "feedback": feedback,
         })
 
     return changes
@@ -376,16 +488,21 @@ def process_ai_record(
             sorted oldest to newest.
 
     Returns:
-        A dict with "metrics", "urgent_findings", "flagged_trends",
-        "recent_changes", "risk_score", "decision" (one of "REJECTED",
-        "URGENT", "FLAGGED", "ACCEPTED"), "recommended_action",
+        A dict with "metrics", "ai_extracted_date" (the report's own
+        date as read by the AI Manager, "YYYY-MM-DD" or None - this
+        module never invents a replacement for a None value itself),
+        "urgent_findings", "flagged_trends", "recent_changes",
+        "risk_score", "decision" (one of "REJECTED", "URGENT",
+        "FLAGGED", "ACCEPTED"), "recommended_action",
         "requires_doctor_review", and "summary".
     """
     current_metrics = flatten_ai_metrics(ai_extracted)
+    ai_extracted_date = _extract_report_date(ai_extracted)
 
     if all(value is None for value in current_metrics.values()):
         return {
             "metrics": current_metrics,
+            "ai_extracted_date": ai_extracted_date,
             "urgent_findings": [],
             "flagged_trends": [],
             "recent_changes": [],
@@ -428,6 +545,7 @@ def process_ai_record(
 
     return {
         "metrics": current_metrics,
+        "ai_extracted_date": ai_extracted_date,
         "urgent_findings": urgent_findings,
         "flagged_trends": flagged_trends,
         "recent_changes": recent_changes,
@@ -453,6 +571,7 @@ if __name__ == "__main__":
         "heart_rate": 138,
         "blood_pressure": {"systolic": 188, "diastolic": 122},
         "blood_glucose": 15.4,
+        "report_date": "2026-09-22",
     }
 
     # Historical records use the flat key names data_manager actually
