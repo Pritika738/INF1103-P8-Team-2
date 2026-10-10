@@ -128,6 +128,24 @@ def process_uploaded_report(file_bytes, mime_type):
     return ai_manager.call_ai_with_retry(file_bytes, mime_type, prompt)
 
 
+def generate_consultation_summary(processed_record):
+    """
+    Get a plain-language consultation summary for an already-processed
+    record, via the AI Manager.
+
+    Args:
+        processed_record: dict - the output of
+            logic_manager.process_ai_record().
+
+    Returns:
+        A narrative string from ai_manager.generate_consultation_narrative(),
+        or None if the AI Manager could not produce one - the caller
+        must fall back to a non-AI summary in that case rather than
+        treat None as success.
+    """
+    return ai_manager.generate_consultation_narrative(processed_record)
+
+
 # --- Reusable input-validation helpers -------------------------------------
 
 def get_valid_number(prompt_text):

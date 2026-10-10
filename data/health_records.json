@@ -1,100 +1,6 @@
 [
   {
     "metrics": {
-      "heart_rate": 138,
-      "blood_pressure_systolic": 188,
-      "blood_pressure_diastolic": 122,
-      "blood_glucose": 15.4
-    },
-    "urgent_findings": [
-      {
-        "metric": "Systolic Blood Pressure",
-        "status": "URGENT",
-        "reason": "Systolic Blood Pressure reading of 188 is at a level that usually warrants prompt medical attention."
-      },
-      {
-        "metric": "Diastolic Blood Pressure",
-        "status": "URGENT",
-        "reason": "Diastolic Blood Pressure reading of 122 is at a level that usually warrants prompt medical attention."
-      },
-      {
-        "metric": "Blood Glucose",
-        "status": "URGENT",
-        "reason": "Blood Glucose reading of 15.4 is at a level that usually warrants prompt medical attention."
-      },
-      {
-        "metric": "Heart Rate",
-        "status": "URGENT",
-        "reason": "Heart Rate reading of 138 is at a level that usually warrants prompt medical attention."
-      }
-    ],
-    "flagged_trends": [],
-    "recent_changes": [],
-    "risk_score": 8,
-    "decision": "URGENT",
-    "recommended_action": "These readings fall outside typical safe ranges. Consider contacting a healthcare professional promptly rather than waiting for your next scheduled visit.",
-    "requires_doctor_review": true,
-    "summary": "Urgent: Systolic Blood Pressure, Diastolic Blood Pressure, Blood Glucose, Heart Rate at a level that usually warrants prompt medical attention | Please discuss these results with your doctor at your next consultation.",
-    "date": "2026-09-25"
-  },
-  {
-    "metrics": {
-      "heart_rate": 104,
-      "blood_pressure_systolic": 132,
-      "blood_pressure_diastolic": 85,
-      "blood_glucose": 6.6
-    },
-    "urgent_findings": [],
-    "flagged_trends": [],
-    "recent_changes": [],
-    "risk_score": 0,
-    "decision": "ACCEPTED",
-    "recommended_action": "No action needed - keep up with regular check-ups.",
-    "requires_doctor_review": false,
-    "summary": "All tracked metrics are stable with no notable changes recorded.",
-    "date": "2026-10-09"
-  },
-  {
-    "metrics": {
-      "heart_rate": 138,
-      "blood_pressure_systolic": 188,
-      "blood_pressure_diastolic": 122,
-      "blood_glucose": 15.4
-    },
-    "urgent_findings": [
-      {
-        "metric": "Systolic Blood Pressure",
-        "status": "URGENT",
-        "reason": "Systolic Blood Pressure reading of 188 is at a level that usually warrants prompt medical attention."
-      },
-      {
-        "metric": "Diastolic Blood Pressure",
-        "status": "URGENT",
-        "reason": "Diastolic Blood Pressure reading of 122 is at a level that usually warrants prompt medical attention."
-      },
-      {
-        "metric": "Blood Glucose",
-        "status": "URGENT",
-        "reason": "Blood Glucose reading of 15.4 is at a level that usually warrants prompt medical attention."
-      },
-      {
-        "metric": "Heart Rate",
-        "status": "URGENT",
-        "reason": "Heart Rate reading of 138 is at a level that usually warrants prompt medical attention."
-      }
-    ],
-    "flagged_trends": [],
-    "recent_changes": [],
-    "risk_score": 8,
-    "decision": "URGENT",
-    "recommended_action": "These readings fall outside typical safe ranges. Consider contacting a healthcare professional promptly rather than waiting for your next scheduled visit.",
-    "requires_doctor_review": true,
-    "summary": "Urgent: Systolic Blood Pressure, Diastolic Blood Pressure, Blood Glucose, Heart Rate at a level that usually warrants prompt medical attention | Please discuss these results with your doctor at your next consultation.",
-    "username": "test",
-    "date": "2026-01-01"
-  },
-  {
-    "metrics": {
       "heart_rate": 72,
       "blood_pressure_systolic": 118,
       "blood_pressure_diastolic": 76,
@@ -109,12 +15,13 @@
     "requires_doctor_review": false,
     "summary": "All tracked metrics are stable with no notable changes recorded.",
     "username": "test",
-    "date": "2026-01-01"
-  }
+    "date": "2026-01-01",
+    "record_id": "c83d2230eaeb4594a11c165382a8d694"
+  },
   {
     "metrics": {
       "heart_rate": 138,
-      "blood_pressure_systolic": 166,
+      "blood_pressure_systolic": 188,
       "blood_pressure_diastolic": 122,
       "blood_glucose": 15.4
     },
@@ -147,6 +54,161 @@
     "recommended_action": "These readings fall outside typical safe ranges. Consider contacting a healthcare professional promptly rather than waiting for your next scheduled visit.",
     "requires_doctor_review": true,
     "summary": "Urgent: Systolic Blood Pressure, Diastolic Blood Pressure, Blood Glucose, Heart Rate at a level that usually warrants prompt medical attention | Please discuss these results with your doctor at your next consultation.",
-    "date": "2025-08-27"   
+    "username": "test",
+    "date": "2026-01-01",
+    "record_id": "4c3f71465ec14fb1a945b8eaba67c73a"
+  },
+  {
+    "metrics": {
+      "heart_rate": 54,
+      "blood_pressure_systolic": 98,
+      "blood_pressure_diastolic": 62,
+      "blood_glucose": 4.6
+    },
+    "urgent_findings": [],
+    "flagged_trends": [],
+    "recent_changes": [
+      {
+        "metric": "Systolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "feedback": "Your systolic blood pressure has decreased from 188 to 98 since your last record (improved - moved closer to the typical reference range)."
+      },
+      {
+        "metric": "Diastolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "feedback": "Your diastolic blood pressure has decreased from 122 to 62 since your last record (improved - moved closer to the typical reference range)."
+      },
+      {
+        "metric": "Blood Glucose",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "feedback": "Your blood glucose has decreased from 15.4 to 4.6 since your last record (improved - moved closer to the typical reference range)."
+      },
+      {
+        "metric": "Heart Rate",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "feedback": "Your heart rate has decreased from 138 to 54 since your last record (improved - moved closer to the typical reference range)."
+      }
+    ],
+    "risk_score": 0,
+    "decision": "ACCEPTED",
+    "recommended_action": "No action needed - keep up with regular check-ups.",
+    "requires_doctor_review": false,
+    "summary": "Decreased since last visit: Systolic Blood Pressure, Diastolic Blood Pressure, Blood Glucose, Heart Rate | Please discuss these results with your doctor at your next consultation.",
+    "username": "test",
+    "date": "2026-01-01",
+    "record_id": "db39e12b2dbb4df2a588480ebd543386"
+  },
+  {
+    "metrics": {
+      "heart_rate": 88,
+      "blood_pressure_systolic": 134,
+      "blood_pressure_diastolic": 86,
+      "blood_glucose": 6.3
+    },
+    "urgent_findings": [],
+    "flagged_trends": [],
+    "recent_changes": [
+      {
+        "metric": "Systolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "feedback": "Your systolic blood pressure has increased from 98 to 134 since your last record (worsened - moved further from the typical reference range)."
+      },
+      {
+        "metric": "Diastolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "feedback": "Your diastolic blood pressure has increased from 62 to 86 since your last record (worsened - moved further from the typical reference range)."
+      },
+      {
+        "metric": "Blood Glucose",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "feedback": "Your blood glucose has increased from 4.6 to 6.3 since your last record (worsened - moved further from the typical reference range)."
+      },
+      {
+        "metric": "Heart Rate",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "feedback": "Your heart rate has increased from 54 to 88 since your last record (worsened - moved further from the typical reference range)."
+      }
+    ],
+    "risk_score": 0,
+    "decision": "ACCEPTED",
+    "recommended_action": "No action needed - keep up with regular check-ups.",
+    "requires_doctor_review": false,
+    "summary": "Increased since last visit: Systolic Blood Pressure, Diastolic Blood Pressure, Blood Glucose, Heart Rate | Please discuss these results with your doctor at your next consultation.",
+    "username": "test",
+    "date": "2026-01-01",
+    "record_id": "cb300535b7c44cf0bad49e5a36398d42"
+  },
+  {
+    "metrics": {
+      "heart_rate": 104,
+      "blood_pressure_systolic": 152,
+      "blood_pressure_diastolic": 98,
+      "blood_glucose": 8.2
+    },
+    "urgent_findings": [],
+    "flagged_trends": [
+      {
+        "metric": "Systolic Blood Pressure",
+        "status": "FLAGGED",
+        "reason": "Systolic Blood Pressure (152) is elevated and has been rising for three consecutive readings."
+      },
+      {
+        "metric": "Diastolic Blood Pressure",
+        "status": "FLAGGED",
+        "reason": "Diastolic Blood Pressure (98) is elevated and has been rising for three consecutive readings."
+      },
+      {
+        "metric": "Blood Glucose",
+        "status": "FLAGGED",
+        "reason": "Blood Glucose (8.2) is elevated and has been rising for three consecutive readings."
+      },
+      {
+        "metric": "Heart Rate",
+        "status": "FLAGGED",
+        "reason": "Heart Rate (104) is elevated and has been rising for three consecutive readings."
+      }
+    ],
+    "recent_changes": [
+      {
+        "metric": "Systolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "feedback": "Your systolic blood pressure has increased from 134 to 152 since your last record (worsened - moved further from the typical reference range)."
+      },
+      {
+        "metric": "Diastolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "feedback": "Your diastolic blood pressure has increased from 86 to 98 since your last record (worsened - moved further from the typical reference range)."
+      },
+      {
+        "metric": "Blood Glucose",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "feedback": "Your blood glucose has increased from 6.3 to 8.2 since your last record (worsened - moved further from the typical reference range)."
+      },
+      {
+        "metric": "Heart Rate",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "feedback": "Your heart rate has increased from 88 to 104 since your last record (worsened - moved further from the typical reference range)."
+      }
+    ],
+    "risk_score": 4,
+    "decision": "FLAGGED",
+    "recommended_action": "Discuss these trends with your doctor at your next consultation.",
+    "requires_doctor_review": true,
+    "summary": "Persistent upward trend detected in: Systolic Blood Pressure, Diastolic Blood Pressure, Blood Glucose, Heart Rate | Increased since last visit: Systolic Blood Pressure, Diastolic Blood Pressure, Blood Glucose, Heart Rate | Please discuss these results with your doctor at your next consultation.",
+    "username": "test",
+    "date": "2026-01-01",
+    "record_id": "fbd2100be26e40768e09a3d82248477f"
   }
 ]

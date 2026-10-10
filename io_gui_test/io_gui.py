@@ -7,11 +7,11 @@ import calendar
 import hashlib
 import hmac
 import secrets
-import LogicManagertest, data_manager
 from pathlib import Path
 from datetime import datetime, date
 
 import pandas as pd
+import altair as alt
 
 # This file lives in io_gui_test/, one directory below the four manager
 # modules (io_manager.py, ai_manager.py, logic_manager.py, data_manager.py).
@@ -589,6 +589,23 @@ def records_for_current_user(records):
     return [r for r in records if r.get("username") == user]
 
 
+def latest_record_for_user(records):
+    """
+    Return the single most recent record (by its own report "date",
+    never by upload order) for the Dashboard - or None if there are no
+    records at all.
+
+    Deliberately NOT built on build_record_trends(): that function
+    looks backward through history for each metric's latest non-null
+    value, which would silently show an OLDER report's reading if the
+    newest report is missing that particular measurement. The
+    Dashboard must show exactly what the latest report says, including
+    "Not Available" where it says nothing.
+    """
+    latest = data_manager.get_latest_reports(records, limit=1)
+    return latest[0] if latest else None
+
+
 def build_record_trends(records):
     """
     Group Data Manager records (the shape logic_manager.process_ai_record()
@@ -639,15 +656,27 @@ def build_record_trends(records):
         dates = [p["date"] for p in points]
         latest_point = points[-1]
 
+        # Direction is read directly from the numbers, not guessed by
+        # searching the feedback text - that text now also covers
+        # classification-change wording ("changed from severe to
+        # normal"), which doesn't contain the words "increased"/
+        # "decreased" at all.
+        if len(values) >= 2:
+            if values[-1] > values[-2]:
+                direction = "rising"
+            elif values[-1] < values[-2]:
+                direction = "falling"
+            else:
+                direction = "stable"
+        else:
+            direction = "unknown"
+
         if latest_point["feedback"]:
             note = latest_point["feedback"]
-            direction = "rising" if "increased" in note else "falling"
         elif len(values) >= 2:
             note = f"{len(values)} readings recorded; no significant change since the last visit."
-            direction = "stable"
         else:
-            note = "Only one reading available - not enough to show a trend."
-            direction = "unknown"
+            note = "Insufficient historical data for comparison."
 
         trends.append({
             "metric": info["label"],
@@ -661,6 +690,117 @@ def build_record_trends(records):
         })
 
     return trends
+
+
+def build_multi_axis_trend_chart(records):
+    """
+    Build one combined, interactive trend chart for the Health Trends
+    page, with an INDEPENDENT y-axis per measurement unit, so different
+    scales (mmHg, bpm, mmol/L) are never forced onto one misleading
+    shared scale. Built with Altair, which is already installed as a
+    Streamlit dependency - no new charting library was needed: Altair's
+    layered charts with resolve_scale(y="independent") give true
+    multi-axis plots, plus built-in legends (via the color encoding)
+    and hover tooltips, which is exactly what this page needs.
+
+    Measurements that share a unit (systolic/diastolic blood pressure,
+    both mmHg) share one y-axis and appear as two separately-coloured
+    lines on it, so they stay individually identifiable; heart rate and
+    blood glucose each get their own axis.
+
+    Args:
+        records: list of record dicts (the caller is expected to have
+            already limited this to the latest N reports).
+
+    Returns:
+        An Altair chart ready for st.altair_chart(), or None if there
+        is no plottable (dated, non-null) data at all.
+    """
+    # Each group gets its own axis, explicitly positioned: the first on
+    # the left, the rest stacked on the right with increasing "offset"
+    # (extra pixels pushed outward) so their tick labels sit in their
+    # own vertical strip instead of overlapping each other - Altair/
+    # Vega-Lite does NOT space out a 3rd+ independent axis automatically.
+    axis_groups = [
+        ("Blood Pressure (mmHg)", [
+            ("blood_pressure_systolic", "Systolic BP"),
+            ("blood_pressure_diastolic", "Diastolic BP"),
+        ], "left", 0, "#5e35b1"),
+        ("Heart Rate (bpm)", [("heart_rate", "Heart Rate")], "right", 0, "#d62728"),
+        ("Blood Glucose (mmol/L)", [("blood_glucose", "Blood Glucose")], "right", 55, "#17becf"),
+    ]
+
+    rows = []
+    for record in sorted(records, key=lambda r: r.get("date") or ""):
+        record_date = record.get("date")
+        if not record_date:
+            continue  # cannot place an undated reading on a date axis
+        metrics = record.get("metrics", {})
+        for axis_title, members, _orient, _offset, _color in axis_groups:
+            for metric_key, series_label in members:
+                value = metrics.get(metric_key)
+                if value is None:
+                    continue  # never invent a value for a missing measurement
+                rows.append({
+                    "date": record_date,
+                    "axis": axis_title,
+                    "measurement": series_label,
+                    "value": value,
+                })
+
+    if not rows:
+        return None
+
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"])
+    if df.empty:
+        return None
+
+    layers = []
+    for axis_title, _members, orient, offset, axis_color in axis_groups:
+        subset = df[df["axis"] == axis_title]
+        if subset.empty:
+            continue
+        layers.append(
+            alt.Chart(subset)
+            .mark_line(point=True)
+            .encode(
+                x=alt.X(
+                    "date:T",
+                    title="Report Date",
+                    axis=alt.Axis(format="%d %b %Y", labelAngle=-40),
+                ),
+                y=alt.Y(
+                    "value:Q",
+                    title=axis_title,
+                    axis=alt.Axis(
+                        orient=orient,
+                        offset=offset,
+                        titleColor=axis_color,
+                        labelColor=axis_color,
+                        tickColor=axis_color,
+                    ),
+                ),
+                color=alt.Color("measurement:N", legend=alt.Legend(title="Measurement")),
+                tooltip=[
+                    alt.Tooltip("date:T", title="Date"),
+                    alt.Tooltip("measurement:N", title="Measurement"),
+                    alt.Tooltip("value:Q", title="Value"),
+                ],
+            )
+        )
+
+    if not layers:
+        return None
+
+    return (
+        alt.layer(*layers)
+        .resolve_scale(y="independent")
+        .properties(title="Health Trends - Multiple Y-Axes", height=380)
+        .interactive()
+    )
+
 
 def severity_badge(severity):
     s = SEVERITY_STYLE.get(severity, SEVERITY_STYLE["info"])
@@ -1287,31 +1427,68 @@ def show_dashboard():
                 go("upload")
         return
 
-    trends = build_record_trends(my_records)
-    flagged = [t for t in trends if t["severity"] in ("watch", "important")]
+    # The Dashboard shows the LATEST report's own vitals only - never a
+    # fuller consultation summary (that lives exclusively on the
+    # Consultation page) and never an older report's value standing in
+    # for a measurement the latest report doesn't have.
+    latest_record = latest_record_for_user(my_records)
+    latest_metrics = latest_record.get("metrics", {}) if latest_record else {}
+    is_flagged = bool(latest_record and latest_record.get("requires_doctor_review"))
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        stat_tile("Records", len(my_records), "#a78bfa")
+        stat_tile("Reports on file", len(my_records), "#a78bfa")
     with c2:
-        stat_tile("Metrics tracked", len(trends), "#5eead4")
+        stat_tile("Latest report", latest_record.get("date", "Unknown") if latest_record else "-", "#5eead4")
     with c3:
-        stat_tile("Flagged for review", len(flagged), "#fda4af")
+        stat_tile("Flagged for review", "Yes" if is_flagged else "No", "#fda4af" if is_flagged else "#5eead4")
 
     st.write("")
-    st.subheader("Latest measurements")
-    for t in trends:
+
+    if st.button("+ Add Medical Report", type="primary"):
+        go("upload")
+
+    st.write("")
+    st.subheader("Latest vitals")
+
+    vital_fields = [
+        ("heart_rate", "Heart Rate", "bpm"),
+        ("blood_pressure_systolic", "Systolic BP", "mmHg"),
+        ("blood_pressure_diastolic", "Diastolic BP", "mmHg"),
+        ("blood_glucose", "Blood Glucose", "mmol/L"),
+    ]
+
+    for metric_key, label, unit in vital_fields:
+        value = latest_metrics.get(metric_key)
         with st.container(border=True):
-            cols = st.columns([3, 1.4, 1])
+            cols = st.columns([3, 2])
             with cols[0]:
-                st.markdown("*" + t["metric"] + "*")
-                st.caption(t["note"])
+                st.markdown("*" + label + "*")
             with cols[1]:
-                st.markdown("<div style='font-size:1.4rem;font-weight:800;color:var(--text-strong);font-family:Baloo 2;'>"
-                            + str(t["latest"]) + " <span style='font-size:0.8rem;font-weight:600;"
-                            "color:var(--text-muted);'>" + t["unit"] + "</span></div>", unsafe_allow_html=True)
-            with cols[2]:
-                st.markdown(severity_badge(t["severity"]), unsafe_allow_html=True)
+                if value is None:
+                    st.markdown(
+                        "<div style='text-align:right;color:var(--text-muted);"
+                        "font-weight:700;'>Not Available</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        "<div style='text-align:right;font-size:1.3rem;font-weight:800;"
+                        "color:var(--text-strong);font-family:Baloo 2;'>"
+                        + str(value) + " <span style='font-size:0.78rem;font-weight:600;"
+                        "color:var(--text-muted);'>" + unit + "</span></div>",
+                        unsafe_allow_html=True,
+                    )
+
+    if is_flagged:
+        st.write("")
+        st.markdown(
+            severity_badge("important") + " &nbsp; "
+            "<span style='color:var(--text-muted);font-size:0.88rem;'>"
+            "One or more measurements in your latest report need review - "
+            "see the Consultation page for details.</span>",
+            unsafe_allow_html=True,
+        )
 
 def show_upload():
 
@@ -1391,16 +1568,25 @@ def show_upload():
                     available_months = list(
                         months.keys()
                     )[:current_date.month]
+                    # The current month is the last entry in the
+                    # truncated list above - default the widget to it
+                    # instead of st.selectbox's own default (index 0,
+                    # i.e. always "January"), which is what silently
+                    # dated every report "January 1st" regardless of
+                    # when it was actually uploaded.
+                    default_month_index = len(available_months) - 1
 
                 else:
 
                     available_months = list(
                         months.keys()
                     )
+                    default_month_index = 0
 
                 selected_month_name = st.selectbox(
                     "Month",
-                    options=available_months
+                    options=available_months,
+                    index=default_month_index
                 )
 
                 selected_month = months[
@@ -1424,10 +1610,15 @@ def show_upload():
             ):
 
                 maximum_day = current_date.day
+                # Today's day is the last (maximum) option in this
+                # case - default to it instead of st.selectbox's own
+                # default (index 0, i.e. always day 1).
+                default_day_index = maximum_day - 1
 
             else:
 
                 maximum_day = days_in_month
+                default_day_index = 0
 
             with col3:
 
@@ -1438,7 +1629,8 @@ def show_upload():
                             1,
                             maximum_day + 1
                         )
-                    )
+                    ),
+                    index=default_day_index
                 )
 
             report_date = date(
@@ -1683,58 +1875,6 @@ def show_upload():
                             "Medical report passed input validation."
                         )
 
-                        try:
-                            file_bytes = uploaded_file.read()
-                            
-                            # Hand control right over to the Logic Layer
-                            extracted_data= LogicManagertest.process_vitals_extraction(
-                                file_bytes=file_bytes, 
-                                mime_type=uploaded_file.type
-                            )
-                            historical_records = data_manager.load_health_records()
-                            processed_record = LogicManagertest.process_ai_record(
-                                extracted_data, historical_records
-                            )
-        
-                            print(processed_record)
-                            print(f"\nExtracted data: {extracted_data}\n")
-                            print(f"\nExtracted datatype: {type(extracted_data)}\n")
-                            
-        
-                            # Save the file into your "./data" directory automatically named after the report date
-                            saved_disk_path = LogicManagertest.save_analysis_by_report_date(extracted_data, "report")
-                            print(f"Extraction Complete! File archived on server at: {saved_disk_path}")
-                            
-                            # Cache the resulting object in session state so it survives the download trigger
-                            st.session_state["extracted_json_data"] = extracted_data
-                                    
-                            # Safely look for the extracted date inside your dictionary or Pydantic model
-                            # Adjust this line depending on whether extracted_data is a dict or a Pydantic model
-                            report_date = "unknown_date"
-                            if isinstance(extracted_data, dict):
-                                report_date = extracted_data.get("database_vitals", {}).get("date", "unknown_date")
-                            else:
-                                # If it's a Pydantic object
-                                report_date = getattr(getattr(extracted_data, "database_vitals", None), "date", "unknown_date")
-                    
-                            # Serialize the data to a clean string format
-                            json_string = json.dumps(extracted_data, indent=2, ensure_ascii=False)
-                            
-                            # Provide the Download Button safely linked to the extracted report date name
-                            st.download_button(
-                                label="💾 Download JSON File",
-                                data=json_string,
-                                file_name=f"report_{report_date}.json",
-                                mime="application/json"
-                            )
-        
-        
-                            # Display your structured payload visually in the dashboard
-                            st.json(extracted_data)
-                        except Exception as e:
-                            st.error(f"An error occurred during extraction: {e}")
-        
-
                         if len(validated_pages) > 1:
 
                             st.info(
@@ -1806,11 +1946,48 @@ def show_upload():
                     record_to_save = dict(processed_record)
                     record_to_save["username"] = current_user()
 
-                    # Use the report's own date if the user gave an
-                    # exact one, so history/trends plot it against
-                    # when the report was actually taken - not today.
-                    if validated["date_precision"] == "exact" and validated["date"]:
+                    # Decide the final report date. The AI Manager's own
+                    # reading of the date PRINTED ON THE REPORT (via
+                    # logic_manager's "ai_extracted_date") is preferred
+                    # over the user's manual date-picker selection, since
+                    # it reflects what the document itself actually says
+                    # - the manual date is only a fallback for when
+                    # Gemini could not confidently identify one (it is
+                    # told to return null rather than guess).
+                    ai_date = processed_record.get("ai_extracted_date")
+                    if ai_date:
+                        record_to_save["date"] = ai_date
+                        date_source = "detected automatically from the report"
+                    elif validated["date_precision"] == "exact" and validated["date"]:
                         record_to_save["date"] = validated["date"]
+                        date_source = "the date you entered"
+                    else:
+                        date_source = (
+                            "today's date - no report date could be "
+                            "detected or entered"
+                        )
+
+                    # Archive the ORIGINAL uploaded file, byte-for-byte,
+                    # separately from the extracted values above, and
+                    # link the two via report_id. If this archiving step
+                    # fails, the extracted health data is still saved
+                    # below - losing the backup copy of the original
+                    # file shouldn't also block the user's health data.
+                    original_entry = data_manager.save_original_report(
+                        file_bytes=first_page["bytes"],
+                        original_filename=first_page["name"],
+                        mime_type=first_page["mime_type"],
+                        report_date=record_to_save.get("date"),
+                        username=current_user(),
+                    )
+                    if original_entry:
+                        record_to_save["report_id"] = original_entry["report_id"]
+                    else:
+                        st.warning(
+                            "Your extracted results were processed, but the "
+                            "original file could not be archived for Health "
+                            "History."
+                        )
 
                     saved = data_manager.save_record(record_to_save)
 
@@ -1827,14 +2004,35 @@ def show_upload():
                             severity_badge(severity), unsafe_allow_html=True
                         )
                         st.success("Report processed and saved.")
+                        st.caption(
+                            f"Report date: {record_to_save.get('date', 'Unknown')} "
+                            f"({date_source})."
+                        )
                         st.write(processed_record["summary"])
-                        st.json(processed_record["metrics"])
+
+                        extracted_metrics = processed_record["metrics"]
+                        metric_rows = [
+                            {
+                                "Measurement": logic_manager.METRIC_LABELS.get(key, key),
+                                "Value": (
+                                    f"{value} {METRIC_UNITS.get(key, '')}".strip()
+                                    if value is not None
+                                    else "Not Available"
+                                ),
+                            }
+                            for key, value in extracted_metrics.items()
+                        ]
+                        st.table(metric_rows)
 
                         del st.session_state["validated_report"]
 
 
 def show_history():
     hero("Health History", "Every reading you have recorded, over time")
+
+    # Give any record saved before record_id existed one now, so it can
+    # be found and corrected below. A no-op write when nothing's missing.
+    data_manager.backfill_record_ids()
 
     # Loaded through the Data Manager - never read the JSON file here.
     all_records = data_manager.load_health_records()
@@ -1874,6 +2072,142 @@ def show_history():
     st.download_button("Download history (CSV)",
                        data=chr(10).join(csv_lines).encode("utf-8"),
                        file_name="health_history.csv", mime="text/csv")
+
+    # -------------------------------------------------
+    # EDIT A REPORT DATE
+    # -------------------------------------------------
+    # Lets a user correct a record saved with the wrong date (e.g. an
+    # upload form that defaulted incorrectly) without deleting or
+    # recreating anything else about that record.
+    with st.expander("Edit a report date"):
+        st.caption(
+            "If a report was saved with the wrong date, correct it here. "
+            "Nothing else about the report changes."
+        )
+
+        sorted_records = sorted(my_records, key=lambda r: r.get("date") or "")
+        record_options = {
+            r["record_id"]: (
+                f"{r.get('date', 'Unknown date')} - {r.get('decision', '')} "
+                f"(heart rate {r.get('metrics', {}).get('heart_rate', 'Not Available')})"
+            )
+            for r in sorted_records
+            if r.get("record_id")
+        }
+
+        if not record_options:
+            st.caption("No editable records found.")
+        else:
+            selected_id = st.selectbox(
+                "Select a report to correct",
+                options=list(record_options.keys()),
+                format_func=lambda rid: record_options[rid],
+            )
+            selected_record = next(
+                (r for r in sorted_records if r.get("record_id") == selected_id), None
+            )
+
+            new_date = st.date_input("Correct report date", value=date.today())
+
+            if st.button("Update Date"):
+                if data_manager.update_record_date(selected_id, new_date.isoformat()):
+                    st.success("Date updated.")
+                    st.rerun()
+                else:
+                    st.error("Could not update this record's date. Please try again.")
+
+            # Safe re-extraction: ask the AI Manager to re-read the date
+            # off the ORIGINAL uploaded file (if one was archived for
+            # this record), show what it found, and only apply it if
+            # the user explicitly confirms - this never overwrites a
+            # date on its own.
+            original_entry = (
+                data_manager.get_original_report_by_id(selected_record["report_id"])
+                if selected_record and selected_record.get("report_id")
+                else None
+            )
+
+            if original_entry:
+                st.write("")
+                if st.button("Detect date from original file with AI"):
+                    with st.spinner("Asking the AI Manager to re-read the report date..."):
+                        original_bytes = data_manager.get_original_report_bytes(
+                            original_entry["stored_filename"]
+                        )
+                        ai_extracted = (
+                            io_manager.process_uploaded_report(
+                                original_bytes,
+                                original_entry.get("mime_type", "application/pdf"),
+                            )
+                            if original_bytes
+                            else None
+                        )
+                    detected_date = (ai_extracted or {}).get("report_date")
+                    if detected_date:
+                        st.session_state["detected_date_" + selected_id] = detected_date
+                    else:
+                        st.warning(
+                            "The AI Manager could not confidently detect a "
+                            "date from the original file."
+                        )
+
+                detected_key = "detected_date_" + selected_id
+                if detected_key in st.session_state:
+                    st.info(f"AI detected report date: {st.session_state[detected_key]}")
+                    if st.button("Use this detected date"):
+                        if data_manager.update_record_date(
+                            selected_id, st.session_state[detected_key]
+                        ):
+                            del st.session_state[detected_key]
+                            st.success("Date updated from AI detection.")
+                            st.rerun()
+                        else:
+                            st.error(
+                                "Could not update this record's date. "
+                                "Please try again."
+                            )
+            else:
+                st.caption(
+                    "No original file is archived for this record, so "
+                    "automatic AI date detection isn't available - "
+                    "correct it manually above."
+                )
+
+    # -------------------------------------------------
+    # ORIGINAL MEDICAL REPORTS
+    # -------------------------------------------------
+    # The actual uploaded files, byte-for-byte, kept forever regardless
+    # of config.LATEST_REPORTS_LIMIT - that limit only affects Trends
+    # and Consultation, never what stays visible here.
+    st.divider()
+    st.subheader("Original Medical Reports")
+
+    original_reports = data_manager.list_original_reports(current_user())
+
+    if not original_reports:
+        st.caption("Original files you upload will be archived here.")
+    else:
+        for entry in original_reports:
+            with st.container(border=True):
+                cols = st.columns([2, 2, 2, 1])
+                with cols[0]:
+                    st.markdown(f"**Report date:** {entry.get('report_date') or 'Unknown'}")
+                with cols[1]:
+                    st.caption(f"Uploaded {entry.get('upload_date', '')}")
+                with cols[2]:
+                    st.caption(entry.get("filename", ""))
+                with cols[3]:
+                    file_bytes = data_manager.get_original_report_bytes(entry["stored_filename"])
+                    if file_bytes:
+                        st.download_button(
+                            "Download",
+                            data=file_bytes,
+                            file_name=entry.get("filename") or entry["stored_filename"],
+                            mime=entry.get("mime_type") or "application/octet-stream",
+                            key="original_" + entry["report_id"],
+                        )
+                    else:
+                        st.caption("File unavailable")
 
     st.divider()
     st.subheader("Trends over time")
@@ -1931,12 +2265,36 @@ def show_trends():
 
         return
 
+    # Active trend analysis only uses the latest N report dates (see
+    # config.LATEST_REPORTS_LIMIT) - Health History still shows every
+    # report regardless, since it loads my_records directly, not this.
+    recent_records = data_manager.get_latest_reports(my_records)
+
     # Grouped and classified by logic_manager's own stored evaluation -
     # not recomputed in this file. See build_record_trends().
-    trends = build_record_trends(my_records)
+    trends = build_record_trends(recent_records)
 
+    st.caption(
+        f"Based on your latest {len(recent_records)} report(s)"
+        + (f" out of {len(my_records)} on file." if len(my_records) > len(recent_records) else ".")
+    )
+
+    st.subheader("Combined trend chart")
+
+    combined_chart = build_multi_axis_trend_chart(recent_records)
+    if combined_chart is not None:
+        st.altair_chart(combined_chart, use_container_width=True)
+        st.caption(
+            "Blood pressure, heart rate, and blood glucose each use their "
+            "own scale (right), so they are never compared on one "
+            "misleading shared axis. Hover a point for its exact reading."
+        )
+    else:
+        st.info("Not enough dated measurements yet to draw a combined chart.")
+
+    st.divider()
     st.subheader(
-        "Measurements over time"
+        "Measurement details"
     )
 
     # Make one card/chart for each health metric
@@ -2031,8 +2389,25 @@ def show_consultation():
             st.write("Add some medical records first, then generate your summary here.")
         return
 
-    trends = build_record_trends(my_records)
-    report = build_report(who, trends)
+    # Consultation preparation only uses the latest N report dates (see
+    # config.LATEST_REPORTS_LIMIT) - Health History still shows every
+    # report regardless, since it loads my_records directly, not this.
+    recent_records = data_manager.get_latest_reports(my_records)
+    trends = build_record_trends(recent_records)
+
+    # The AI Manager only ever phrases logic_manager's own already-
+    # decided findings into plain language here - it never classifies
+    # anything itself (see ai_manager.generate_consultation_narrative()).
+    # If Gemini is unavailable or returns nothing usable, this is None
+    # and build_report() below falls back to the deterministic,
+    # rule-based summary rather than fabricating an AI result.
+    latest_processed_record = latest_record_for_user(recent_records)
+    ai_narrative = None
+    if latest_processed_record:
+        with st.spinner("Preparing your consultation summary..."):
+            ai_narrative = io_manager.generate_consultation_summary(latest_processed_record)
+
+    report = build_report(who, trends, ai_narrative)
 
     with st.container(border=True):
         st.markdown("<div style='border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:8px;'>"
@@ -2069,26 +2444,91 @@ def show_consultation():
 
     st.write("")
     pdf_bytes, err = build_pdf(who, report)
+    report_date = latest_processed_record.get("date") if latest_processed_record else None
+
     if err:
         st.info("PDF not available (" + err + "). A text download is offered instead.")
         st.download_button("Download report (TXT)",
                            data=report_text(who, report).encode("utf-8"),
                            file_name="consultation_report.txt", mime="text/plain")
     else:
-        st.download_button("Download consultation report (PDF)", data=pdf_bytes,
-                           file_name="consultation_report.pdf",
-                           mime="application/pdf", type="primary")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.download_button("Download consultation report (PDF)", data=pdf_bytes,
+                               file_name="consultation_report.pdf",
+                               mime="application/pdf", type="primary")
+        with col2:
+            if st.button("Save to Summary History"):
+                saved_entry = data_manager.save_consultation_pdf(
+                    pdf_bytes=pdf_bytes,
+                    report_date=report_date,
+                    username=current_user(),
+                )
+                if saved_entry:
+                    st.success("Saved to Summary History below.")
+                else:
+                    st.error("Could not save this summary. Please try again.")
 
-def build_report(who, trends):
-    summary, questions, notes = "", [], []
+    # -------------------------------------------------
+    # SUMMARY HISTORY
+    # -------------------------------------------------
+    st.divider()
+    st.subheader("Summary History")
+
+    saved_summaries = data_manager.list_consultation_pdfs(current_user())
+
+    if not saved_summaries:
+        st.caption("Summaries you save will appear here for later download.")
+    else:
+        for entry in saved_summaries:
+            with st.container(border=True):
+                st.markdown(f"\U0001F4C4 **{entry['filename']}**")
+                cols = st.columns([2, 2, 1])
+                with cols[0]:
+                    st.caption(f"Report date: {entry.get('report_date') or 'Unknown'}")
+                with cols[1]:
+                    st.caption(f"Generated {entry.get('generated_at', '')}")
+                with cols[2]:
+                    pdf_data = data_manager.get_consultation_pdf_bytes(entry["filename"])
+                    if pdf_data:
+                        st.download_button(
+                            "Download",
+                            data=pdf_data,
+                            file_name=entry["filename"],
+                            mime="application/pdf",
+                            key="summary_" + entry["filename"],
+                        )
+                    else:
+                        st.caption("File unavailable")
+
+def build_report(who, trends, ai_narrative=None):
+    """
+    ai_narrative, if provided, is Gemini's own plain-language phrasing
+    of logic_manager's already-decided findings (see
+    ai_manager.generate_consultation_narrative()) and is used as the
+    summary text as-is. If it is None - Gemini was unavailable or
+    returned nothing usable - this falls back to a summary built
+    purely from trends' own rule-based classifications, so a missing
+    AI result is never silently presented as if it had succeeded.
+    """
+    questions, notes = [], []
     if trends:
         rising = [t["metric"] for t in trends if t["direction"] == "rising"]
         if rising:
-            summary = "Readings increased over time for: " + ", ".join(rising) + "."
             questions.append("Are the upward trends in " + ", ".join(rising)
                              + " something I should act on?")
         notes.append("Trends are based only on the records provided and are not a "
                      "diagnosis. Please confirm with your doctor.")
+
+    if ai_narrative:
+        summary = ai_narrative
+    elif trends:
+        rising = [t["metric"] for t in trends if t["direction"] == "rising"]
+        summary = ("Readings increased over time for: " + ", ".join(rising) + "."
+                   ) if rising else ""
+    else:
+        summary = ""
+
     return {"summary": summary, "questions": questions, "notes": notes, "trends": trends}
 
 def report_text(who, report):
