@@ -58,6 +58,49 @@ JSON-serialisable report dict.
 
 import re
 from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field
+from Ai_Managertest import AIManager
+from config import DATA_DIR
+import os, json
+
+# Prompt templates for to prompt AI
+PROMPT_TEMPLATES: Dict[str, str] = {    
+    "extract": (
+        "You are a compassionate clinical communication assistant. Your task is to process "
+        "this medical document to extract data, synthesize findings, and flag key follow-ups.\n\n"
+        "INSTRUCTIONS:\n"
+        "- Extract all visible numerical health metrics and vital signs.\n"
+        "- Write a patient-friendly summary explaining the document's contents in clear, comforting language.\n"
+        "- Flag critical, actionable areas or specific follow-up appointments the patient needs to remember.\n\n"
+        
+        # 🔧 CRITICAL FIX: Directing the model to omit structural wrappers
+        "JSON STRUCTURING RULE:\n"
+        "- Do NOT wrap properties with text labels like 'VitalsReading(...)' or 'PatientAlert(...)'.\n"
+        "- Output all fields strictly as standard, raw JSON objects, values, and lists.\n\n"
+        
+        "CRITICAL SAFETY & QUALITY RULES:\n"
+        "- Do not include and personal details of the paitient in the summary"
+        "- Do not provide a novel clinical diagnosis. Only summarize what the document states.\n"
+        "- Do not suggest or prescribe medications, treatments, or alternative therapies.\n"
+        "- Stick strictly to the text provided. Do not guess or infer missing clinical data."
+        
+    ),
+    
+    "summary": (
+        "You are an advanced clinical analytics specialist. You will be provided with a "
+        "chronological list of multiple historical health records belonging to the same patient.\n\n"
+        "HISTORICAL PATIENT DATA:\n"
+        "{json_data}\n\n" # Required*** DO NOT REMOVE
+        "INSTRUCTIONS:\n"
+        "- Analyze these reports sequentially from the oldest file date to the newest.\n"
+        "- Identify clear metric trajectories, systemic trends, and escalating shifts.\n"
+        "- Explicitly pull out any deteriorating vital paths into your critical focus areas.\n\n"
+        "CRITICAL RULES:\n"
+        "- Focus strictly on comparing the provided historical data points. Do not guess records.\n"
+        "- Map your synthesis fields precisely to match the properties required by the schema."
+    )
+}
 
 
 # --- Tracked metrics -----------------------------------------------------
@@ -134,6 +177,102 @@ RECENT_CHANGE_TOLERANCES = {
     "heart_rate": 5,
 }
 
+# 1.1 Schema for summary
+class TrendMetric(BaseModel):
+    metric: str = Field(description="The health metric being tracked (e.g., Blood Pressure, Heart Rate)")
+    direction: str = Field(description="The trend trajectory over time: 'Improving', 'Worsening', or 'Stable'")
+    observation: str = Field(description="A brief description of what the numbers show over the dates.")
+
+# 1.2 Schema for summary
+class TrendAnalysis(BaseModel):
+    date: str = Field(description="Today's date formatted as YYYY-MM-DD")
+    overall_health_trajectory: str = Field(description="A 3-4 sentence high-level overview of how the patient is progressing across all reports.")
+    key_areas_of_concern: List[str] = Field(description="Bullet points of specific metrics or symptoms that need immediate medical review.")
+    tracked_trends: List[TrendMetric] = Field(description="A list breakdown of each individual vital sign's trend trajectory.")
+
+
+# 2.2 Schema for data extraction
+class MedicalAnalysis(BaseModel):
+    # Saving vitals in report
+    date: str = Field(description="The date of the report or reading formatted as YYYY-MM-DD")
+    blood_pressure: Optional[str] = Field(None, description="The blood pressure reading, e.g., '140/80'")
+    heart_rate: Optional[int] = Field(None, description="The pulse/heart rate value as an integer bpm")
+    blood_glucose: Optional[str] = Field(None, description="The blood glucose value if present, otherwise null")
+
+    # Generate a summary
+    patient_summary: str = Field(description="A friendly, clear 2-3 sentence overview of the medical report written directly to the patient.")
+
+
+def process_vitals_extraction(file_bytes: bytes, mime_type: str):
+    print("extracting... ")
+    
+    prompt_text = PROMPT_TEMPLATES.get("extract", "Extract data fields cleanly.")
+
+    # Call AI Manager
+    raw_json = AIManager.call_ai_structured(
+        file_bytes=file_bytes,
+        mime_type=mime_type,
+        prompt=prompt_text,     # Prompt from PROMPT_TEMPLATE for easy edit
+        schema=MedicalAnalysis     # Injected dynamic typing reference
+    )
+
+    # Return the response
+    return raw_json
+
+def process_summary_report():
+    all_reports = []
+
+    # Read all saved JSON report files in DATA_DIR
+    if os.path.exists(DATA_DIR):
+        for filename in sorted(os.listdir(DATA_DIR)):
+            if filename.startswith("report_") and filename.endswith(".json"):
+                file_path = os.path.join(DATA_DIR, filename)
+                with open(file_path, "r", encoding="utf-8") as f:
+                    all_reports.append(json.load(f))
+
+    # If no report is detected
+    if not all_reports:
+        raise ValueError("No historical reports found in the data directory to analyze.")
+
+    # Create prompt
+    base_template = PROMPT_TEMPLATES["summary"]
+    if not base_template:
+        raise ValueError("The 'summary' prompt template is missing from global configurations.")
+        
+    final_prompt = base_template.format(json_data=json.dumps(all_reports, indent=2)) #json_data in prompt
+
+    # Call AI Manager
+    raw_json = Ai_Managertest.call_ai_structured_no_file(
+        prompt=final_prompt,
+        schema=TrendAnalysis
+    )
+
+    # Return AI response
+    return raw_json
+
+def save_analysis_by_report_date(analysis_data , reporttype:str) -> str:
+    """
+    Saves the validated Pydantic model payload as a clean JSON file,
+    naming it after the extracted report date.
+    """
+    print("Saving...")
+
+    # Ensure the destination folder exists safely
+    os.makedirs(DATA_DIR, exist_ok=True)
+    
+    # Extract the date from the json file
+    data_dict = json.loads(analysis_data)
+    report_date = data_dict["date"]
+    
+    # Remove characters that are illegal in file names and replace to '_'
+    safe_filename = report_date.replace("/", "-").replace(" ", "_")
+    file_path = os.path.join(DATA_DIR, f"{reporttype}_{safe_filename}.json")
+    
+    # Save the json file as 'report_{date}.json'
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data_dict, f, indent=2, ensure_ascii=False)
+        
+    return file_path
 
 def _parse_blood_pressure(raw: Any) -> Tuple[Optional[float], Optional[float]]:
     """
@@ -617,7 +756,7 @@ if __name__ == "__main__":
     # works the same whether it's run from this folder, the project
     # root, or anywhere else.
     MOCK_AI_OUTPUT_PATH = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "mock_ai_output.json"
+        os.path.dirname(os.path.abspath(__file__)), "data", "health_records.json"
     )
 
     mock_ai_extracted = None
@@ -642,7 +781,7 @@ if __name__ == "__main__":
     # relative to this script's own directory, never hardcoded here -
     # so both mock inputs can be edited without touching this file.
     MOCK_HISTORY_PATH = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "mock_history.json"
+        os.path.dirname(os.path.abspath(__file__)), "data","mock_history.json"
     )
 
     mock_history = []

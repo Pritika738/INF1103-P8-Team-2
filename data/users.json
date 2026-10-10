@@ -1,8 +1,8 @@
 {
-    "test": {
-        "username": "test",
-        "email": "test@gmail.com",
-        "salt": "4955433ad1a69f10747cb2d5374756d2",
-        "password_hash": "d7a19ab2f7f63daa463a7d9115f72e4b5886eab60342e84b949a513ff8720d34"
+    "tester05": {
+        "username": "tester05",
+        "email": "test@test.com",
+        "salt": "d7b7da7953905fcdc9ffd6c493bf40f0",
+        "password_hash": "e395f71d86f99fe0a1b644fed25a9395dd14ba6f2aa34f23707035b9358eeb95"
     }
 }
