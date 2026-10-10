@@ -309,7 +309,7 @@ def analyze_recent_changes(
     changes = []
 
     if not historical_records:
-        return changes  # no past data to compare against
+        return changes # no past data to compare against
 
     last_record = historical_records[-1]
 
@@ -342,7 +342,7 @@ def analyze_recent_changes(
         # the change explicitly as "improved"/"worsened" so a later
         # summary never has to guess whether a change was good or bad -
         # it reads this classification instead of inventing one.
-        assessment = "worsened" if delta > 0 else "improved"
+        assessment = "worsened" if delta > 0 else "improved" 
 
         if classification_changed:
             feedback = (
