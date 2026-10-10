@@ -57,7 +57,7 @@ TRACKED_METRICS = [
     "blood_glucose",
     "heart_rate",
 ]
-
+# ADDING METRIC LABELS
 METRIC_LABELS = {
     "blood_pressure_systolic": "Systolic Blood Pressure",
     "blood_pressure_diastolic": "Diastolic Blood Pressure",
