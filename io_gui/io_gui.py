@@ -1814,12 +1814,17 @@ def show_upload():
             ".jpeg"
         }
 
+        # Tracks whether the file *combination* (not yet each file's own
+        # content) is one AI Analysis is allowed to run on below.
+        combo_valid = True
+
         # More than one PDF is not allowed
         if pdf_count > 1:
 
             st.error(
                 "Please upload only one PDF at a time."
             )
+            combo_valid = False
 
         # PDF cannot be mixed with images
         elif (
@@ -1831,6 +1836,7 @@ def show_upload():
                 "Please upload either one PDF OR one or more "
                 "image pages of the same report, not both."
             )
+            combo_valid = False
 
         # Multiple files must all be images
         elif (
@@ -1845,6 +1851,7 @@ def show_upload():
                 "Multiple-file upload is only supported "
                 "for PNG, JPG or JPEG images."
             )
+            combo_valid = False
 
         # -------------------------------------------------
         # SHOW SELECTED FILES
@@ -1873,286 +1880,201 @@ def show_upload():
 
         st.write("")
 
-
-
-        # -------------------------------------------------
-        # VALIDATION
-        # -------------------------------------------------
-
-        if st.button(
-            "Validate Medical Report",
-            type="primary",
-            use_container_width=True
-        ):
-
-            if not uploaded_files:
-
-                st.error(
-                    "Please select a medical report."
-                )
-
-            else:
-
-                extensions = [
-                    Path(file.name).suffix.lower()
-                    for file in uploaded_files
-                ]
-
-                pdf_count = extensions.count(".pdf")
-
-                image_extensions = {
-                    ".png",
-                    ".jpg",
-                    ".jpeg"
-                }
-
-                # More than one PDF is not one report submission
-                if pdf_count > 1:
-
-                    st.error(
-                        "Please upload only one PDF at a time."
-                    )
-
-                # PDF cannot be mixed with image pages
-                elif (
-                    pdf_count == 1
-                    and len(uploaded_files) > 1
-                ):
-
-                    st.error(
-                        "Please upload either one PDF OR multiple "
-                        "image pages of the same report, not both."
-                    )
-
-                # Multiple files must all be images
-                elif (
-                    len(uploaded_files) > 1
-                    and not all(
-                        extension in image_extensions
-                        for extension in extensions
-                    )
-                ):
-
-                    st.error(
-                        "Multiple-file upload is only supported "
-                        "for PNG, JPG or JPEG pages belonging "
-                        "to the same medical report."
-                    )
-
-                else:
-
-                    validated_pages = []
-                    errors = []
-
-                    for uploaded_file in uploaded_files:
-
-                        valid, message = validate_uploaded_report(
-                            uploaded_file
-                        )
-
-                        if valid:
-
-                            validated_pages.append(
-                                {
-                                    "name": uploaded_file.name,
-                                    "mime_type": uploaded_file.type,
-                                    "size": uploaded_file.size,
-                                    "bytes": uploaded_file.getvalue()
-                                }
-                            )
-
-                        else:
-
-                            errors.append(
-                                f"{uploaded_file.name}: {message}"
-                            )
-
-                    if errors:
-
-                        st.error(
-                            "Some uploaded files failed validation:"
-                        )
-
-                        for error in errors:
-                            st.write(f"• {error}")
-
-                    else:
-
-                        st.session_state["validated_report"] = {
-                            "date_precision":
-                                report_date_info["date_precision"],
-
-                            "date":
-                                report_date_info["date"],
-
-                            "year":
-                                report_date_info["year"],
-
-                            "pages":
-                                validated_pages
-                        }
-
-                        st.success(
-                            "Medical report passed input validation."
-                        )
-
-                        if len(validated_pages) > 1:
-
-                            st.info(
-                                f"{len(validated_pages)} image pages "
-                                "were recognised as one medical report."
-                            )
-
-                        else:
-
-                            st.info(
-                                "The report is ready for AI analysis."
-                            )
-
     # -------------------------------------------------
     # AI / LOGIC / DATA MANAGER PIPELINE
     # -------------------------------------------------
-    # Only shown once a report has passed input validation above.
-    # This block never talks to Gemini directly, never applies
+    # Clicking "Analyze with AI" below now does everything in one step:
+    # basic technical file checks (format/size/readability, the same
+    # checks a separate "Validate Medical Report" button used to run
+    # first), then the AI Manager pipeline. There is no longer a
+    # separate validated-report gate the user has to pass through
+    # first - this block never talks to Gemini directly, never applies
     # business-rule thresholds itself, and never writes JSON itself -
     # it only calls into io_manager -> ai_manager -> logic_manager ->
     # data_manager, exactly as the architecture requires.
 
-    validated = st.session_state.get("validated_report")
+    st.write("")
 
-    if validated:
+    with st.container(border=True):
 
-        st.write("")
+        st.subheader("AI Analysis")
 
-        with st.container(border=True):
-
-            st.subheader("AI Analysis")
-
-            first_page = validated["pages"][0]
-
+        if uploaded_files:
             st.caption(
-                f"Ready to analyse: {first_page['name']}"
+                f"Ready to analyse: {uploaded_files[0].name}"
                 + (
-                    f" (plus {len(validated['pages']) - 1} more page(s) - "
+                    f" (plus {len(uploaded_files) - 1} more page(s) - "
                     "only the first page is sent for AI analysis today)"
-                    if len(validated["pages"]) > 1
+                    if len(uploaded_files) > 1
                     else ""
                 )
             )
+        else:
+            st.caption("Upload a medical report above, then click Analyze with AI.")
 
-            if st.button(
-                "Analyze with AI",
-                type="primary",
-                use_container_width=True,
-            ):
+        if st.button(
+            "Analyze with AI",
+            type="primary",
+            use_container_width=True,
+        ):
 
-                with st.spinner("Sending report to the AI Manager..."):
-                    ai_extracted = io_manager.process_uploaded_report(
-                        first_page["bytes"], first_page["mime_type"]
+            if not uploaded_files:
+
+                st.error("Please select a medical report.")
+
+            elif not combo_valid:
+
+                # The specific reason (too many PDFs, mixed PDF/image
+                # pages, etc.) is already shown above, live, as soon as
+                # it became true - nothing further to add here.
+                pass
+
+            else:
+
+                validated_pages = []
+                errors = []
+
+                for uploaded_file in uploaded_files:
+
+                    valid, message = validate_uploaded_report(
+                        uploaded_file
                     )
 
-                    all_records = data_manager.load_health_records()
-                    user_records = records_for_current_user(all_records)
+                    if valid:
 
-                    processed_record = logic_manager.process_ai_record(
-                        ai_extracted, user_records
+                        validated_pages.append(
+                            {
+                                "name": uploaded_file.name,
+                                "mime_type": uploaded_file.type,
+                                "size": uploaded_file.size,
+                                "bytes": uploaded_file.getvalue()
+                            }
+                        )
+
+                    else:
+
+                        errors.append(
+                            f"{uploaded_file.name}: {message}"
+                        )
+
+                if errors:
+
+                    st.error(
+                        "Some uploaded files failed validation:"
                     )
 
-                if processed_record["decision"] == "NOT_MEDICAL_REPORT":
-
-                    st.error("**Invalid Medical Report**")
-                    st.write(processed_record["recommended_action"])
-                    if processed_record["summary"]:
-                        st.caption(processed_record["summary"])
-
-                elif processed_record["decision"] == "REJECTED":
-
-                    st.error(processed_record["recommended_action"])
+                    for error in errors:
+                        st.write(f"• {error}")
 
                 else:
 
-                    record_to_save = dict(processed_record)
-                    record_to_save["username"] = current_user()
+                    first_page = validated_pages[0]
 
-                    # Decide the final report date. The AI Manager's own
-                    # reading of the date PRINTED ON THE REPORT (via
-                    # logic_manager's "ai_extracted_date") is preferred
-                    # over the user's manual date-picker selection, since
-                    # it reflects what the document itself actually says
-                    # - the manual date is only a fallback for when
-                    # Gemini could not confidently identify one (it is
-                    # told to return null rather than guess).
-                    ai_date = processed_record.get("ai_extracted_date")
-                    if ai_date:
-                        record_to_save["date"] = ai_date
-                        date_source = "detected automatically from the report"
-                    elif validated["date_precision"] == "exact" and validated["date"]:
-                        record_to_save["date"] = validated["date"]
-                        date_source = "the date you entered"
+                    with st.spinner("Sending report to the AI Manager..."):
+                        ai_extracted = io_manager.process_uploaded_report(
+                            first_page["bytes"], first_page["mime_type"]
+                        )
+
+                        all_records = data_manager.load_health_records()
+                        user_records = records_for_current_user(all_records)
+
+                        processed_record = logic_manager.process_ai_record(
+                            ai_extracted, user_records
+                        )
+
+                    if processed_record["decision"] == "NOT_MEDICAL_REPORT":
+
+                        st.error("**Invalid Medical Report**")
+                        st.write(processed_record["recommended_action"])
+                        if processed_record["summary"]:
+                            st.caption(processed_record["summary"])
+
+                    elif processed_record["decision"] == "REJECTED":
+
+                        st.error(processed_record["recommended_action"])
+
                     else:
-                        date_source = (
-                            "today's date - no report date could be "
-                            "detected or entered"
-                        )
 
-                    # Archive the ORIGINAL uploaded file, byte-for-byte,
-                    # separately from the extracted values above, and
-                    # link the two via report_id. If this archiving step
-                    # fails, the extracted health data is still saved
-                    # below - losing the backup copy of the original
-                    # file shouldn't also block the user's health data.
-                    original_entry = data_manager.save_original_report(
-                        file_bytes=first_page["bytes"],
-                        original_filename=first_page["name"],
-                        mime_type=first_page["mime_type"],
-                        report_date=record_to_save.get("date"),
-                        username=current_user(),
-                    )
-                    if original_entry:
-                        record_to_save["report_id"] = original_entry["report_id"]
-                    else:
-                        st.warning(
-                            "Your extracted results were processed, but the "
-                            "original file could not be archived for Health "
-                            "History."
-                        )
+                        record_to_save = dict(processed_record)
+                        record_to_save["username"] = current_user()
 
-                    saved = data_manager.save_record(record_to_save)
+                        # Decide the final report date. The AI Manager's own
+                        # reading of the date PRINTED ON THE REPORT (via
+                        # logic_manager's "ai_extracted_date") is preferred
+                        # over the user's manual date-picker selection, since
+                        # it reflects what the document itself actually says
+                        # - the manual date is only a fallback for when
+                        # Gemini could not confidently identify one (it is
+                        # told to return null rather than guess).
+                        ai_date = processed_record.get("ai_extracted_date")
+                        if ai_date:
+                            record_to_save["date"] = ai_date
+                            date_source = "detected automatically from the report"
+                        elif report_date_info["date_precision"] == "exact" and report_date_info["date"]:
+                            record_to_save["date"] = report_date_info["date"]
+                            date_source = "the date you entered"
+                        else:
+                            date_source = (
+                                "today's date - no report date could be "
+                                "detected or entered"
+                            )
 
-                    if not saved:
-                        st.error(
-                            "The report was processed but could not be "
-                            "saved. Please try again."
+                        # Archive the ORIGINAL uploaded file, byte-for-byte,
+                        # separately from the extracted values above, and
+                        # link the two via report_id. If this archiving step
+                        # fails, the extracted health data is still saved
+                        # below - losing the backup copy of the original
+                        # file shouldn't also block the user's health data.
+                        original_entry = data_manager.save_original_report(
+                            file_bytes=first_page["bytes"],
+                            original_filename=first_page["name"],
+                            mime_type=first_page["mime_type"],
+                            report_date=record_to_save.get("date"),
+                            username=current_user(),
                         )
-                    else:
-                        severity = DECISION_SEVERITY.get(
-                            processed_record["decision"], "info"
-                        )
-                        st.markdown(
-                            severity_badge(severity), unsafe_allow_html=True
-                        )
-                        st.success("Report processed and saved.")
-                        st.caption(
-                            f"Report date: {record_to_save.get('date', 'Unknown')} "
-                            f"({date_source})."
-                        )
-                        st.write(processed_record["summary"])
+                        if original_entry:
+                            record_to_save["report_id"] = original_entry["report_id"]
+                        else:
+                            st.warning(
+                                "Your extracted results were processed, but the "
+                                "original file could not be archived for Health "
+                                "History."
+                            )
 
-                        extracted_metrics = processed_record["metrics"]
-                        metric_rows = [
-                            {
-                                "Measurement": logic_manager.METRIC_LABELS.get(key, key),
-                                "Value": (
-                                    f"{value} {METRIC_UNITS.get(key, '')}".strip()
-                                    if value is not None
-                                    else "Not Available"
-                                ),
-                            }
-                            for key, value in extracted_metrics.items()
-                        ]
-                        st.table(metric_rows)
+                        saved = data_manager.save_record(record_to_save)
 
-                        del st.session_state["validated_report"]
+                        if not saved:
+                            st.error(
+                                "The report was processed but could not be "
+                                "saved. Please try again."
+                            )
+                        else:
+                            severity = DECISION_SEVERITY.get(
+                                processed_record["decision"], "info"
+                            )
+                            st.markdown(
+                                severity_badge(severity), unsafe_allow_html=True
+                            )
+                            st.success("Report processed and saved.")
+                            st.caption(
+                                f"Report date: {record_to_save.get('date', 'Unknown')} "
+                                f"({date_source})."
+                            )
+                            st.write(processed_record["summary"])
+
+                            extracted_metrics = processed_record["metrics"]
+                            metric_rows = [
+                                {
+                                    "Measurement": logic_manager.METRIC_LABELS.get(key, key),
+                                    "Value": (
+                                        f"{value} {METRIC_UNITS.get(key, '')}".strip()
+                                        if value is not None
+                                        else "Not Available"
+                                    ),
+                                }
+                                for key, value in extracted_metrics.items()
+                            ]
+                            st.table(metric_rows)
 
 
 def show_history():
