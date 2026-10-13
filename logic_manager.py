@@ -493,10 +493,39 @@ def process_ai_record(
         date as read by the AI Manager, "YYYY-MM-DD" or None - this
         module never invents a replacement for a None value itself),
         "urgent_findings", "flagged_trends", "recent_changes",
-        "risk_score", "decision" (one of "REJECTED", "URGENT",
-        "FLAGGED", "ACCEPTED"), "recommended_action",
-        "requires_doctor_review", and "summary".
+        "risk_score", "decision" (one of "NOT_MEDICAL_REPORT",
+        "REJECTED", "URGENT", "FLAGGED", "ACCEPTED"),
+        "recommended_action", "requires_doctor_review", and "summary".
     """
+    # Deterministic acceptance rule: ai_manager already classified the
+    # uploaded document (in the same extraction call, so no extra
+    # Gemini request was needed for this). If it confidently decided
+    # this isn't a medical report at all, that is rejected here before
+    # any measurement/trend logic runs - an unrelated document (e.g. an
+    # exam timetable) must never reach Health History, Health Trends,
+    # or a consultation summary.
+    if isinstance(ai_extracted, dict) and ai_extracted.get("is_medical_report") is False:
+        reason = ai_extracted.get("classification_reason") or (
+            "The uploaded file does not appear to be a medical report."
+        )
+        return {
+            "metrics": flatten_ai_metrics(None),
+            "ai_extracted_date": None,
+            "urgent_findings": [],
+            "flagged_trends": [],
+            "recent_changes": [],
+            "risk_score": 0,
+            "decision": "NOT_MEDICAL_REPORT",
+            "recommended_action": (
+                "The uploaded file does not appear to be a medical "
+                "report. Please upload a valid medical report "
+                "containing health-related examination or test "
+                "information."
+            ),
+            "requires_doctor_review": False,
+            "summary": reason,
+        }
+
     current_metrics = flatten_ai_metrics(ai_extracted)
     ai_extracted_date = _extract_report_date(ai_extracted)
 

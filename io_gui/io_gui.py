@@ -757,6 +757,14 @@ def build_multi_axis_trend_chart(records):
     if df.empty:
         return None
 
+    # Tick marks are pinned to the exact report dates present in the
+    # data (never an auto-generated date scale) so there are at most as
+    # many labels as there are reports - with labelAngle=0 this keeps
+    # them horizontal and non-overlapping without rotating them, even
+    # when multiple records share the same date (duplicates collapse
+    # via the set()/sorted() below).
+    report_dates = sorted(set(df["date"]))
+
     layers = []
     for axis_title, _members, orient, offset, axis_color in axis_groups:
         subset = df[df["axis"] == axis_title]
@@ -769,7 +777,11 @@ def build_multi_axis_trend_chart(records):
                 x=alt.X(
                     "date:T",
                     title="Report Date",
-                    axis=alt.Axis(format="%d %b %Y", labelAngle=-40),
+                    axis=alt.Axis(
+                        format="%d %b %Y",
+                        labelAngle=0,
+                        values=report_dates,
+                    ),
                 ),
                 y=alt.Y(
                     "value:Q",
@@ -784,7 +796,7 @@ def build_multi_axis_trend_chart(records):
                 ),
                 color=alt.Color("measurement:N", legend=alt.Legend(title="Measurement")),
                 tooltip=[
-                    alt.Tooltip("date:T", title="Date"),
+                    alt.Tooltip("date:T", title="Date", format="%d %b %Y"),
                     alt.Tooltip("measurement:N", title="Measurement"),
                     alt.Tooltip("value:Q", title="Value"),
                 ],
@@ -2013,7 +2025,14 @@ def show_upload():
                         ai_extracted, user_records
                     )
 
-                if processed_record["decision"] == "REJECTED":
+                if processed_record["decision"] == "NOT_MEDICAL_REPORT":
+
+                    st.error("**Invalid Medical Report**")
+                    st.write(processed_record["recommended_action"])
+                    if processed_record["summary"]:
+                        st.caption(processed_record["summary"])
+
+                elif processed_record["decision"] == "REJECTED":
 
                     st.error(processed_record["recommended_action"])
 
@@ -2515,7 +2534,7 @@ def show_consultation():
                 )
 
         if report["notes"]:
-            st.markdown("##### In plain language")
+            st.markdown("##### Note")
             for n in report["notes"]:
                 st.markdown("- " + n)
 
@@ -2670,7 +2689,7 @@ def build_pdf(who, report):
                      + " " + t["unit"] + " (" + t["note"] + ")")
             pdf.ln(2)
         if report["notes"]:
-            section("In plain language")
+            section("Note")
             for n in report["notes"]:
                 para("- " + n)
             pdf.ln(2)

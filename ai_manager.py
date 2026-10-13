@@ -56,10 +56,26 @@ def build_prompt():
     """
     return (
         "You are a data extraction assistant. You will be given a "
-        "medical report as a PDF or image.\n\n"
+        "document that is claimed to be a medical report, as a PDF or "
+        "image.\n\n"
+        "STEP 1 - CLASSIFY THE DOCUMENT:\n"
+        "Decide whether this document is genuinely a medical report, "
+        "such as a lab result, vital-signs printout, examination "
+        "summary, or similar clinical document. A document can be a "
+        "valid medical report even if it only contains SOME of the "
+        "measurements below - it does not need to contain all of them. "
+        "A document is NOT a medical report if it is something "
+        "unrelated, such as a school timetable, an exam schedule, an "
+        "invoice or receipt, a resume, a random photo, or any other "
+        "non-clinical document. If you cannot confidently tell it is a "
+        "genuine medical report, treat it as NOT a medical report "
+        "rather than guessing.\n\n"
+        "STEP 2 - EXTRACT (only if it is a medical report):\n"
         "Extract the following if they are clearly visible in the "
         "report: heart rate, blood pressure (systolic and diastolic), "
-        "blood glucose, and the report's own date.\n\n"
+        "blood glucose, and the report's own date. If the document is "
+        "NOT a medical report, set all of these to null - do not "
+        "extract numbers from an unrelated document.\n\n"
         "REPORT DATE RULES:\n"
         '- The report date is the date the measurements were taken or '
         'recorded - look for labels such as "Report Date", '
@@ -81,6 +97,12 @@ def build_prompt():
         "The JSON must contain exactly these fields, with no additional "
         "fields:\n"
         "{\n"
+        '  "is_medical_report": <true or false - your STEP 1 '
+        "classification>,\n"
+        '  "classification_reason": <short string explaining your '
+        "STEP 1 decision, e.g. \"Contains lab test names and vital "
+        'sign readings\" or \"Contains an exam timetable, no clinical '
+        'content\">,\n'
         '  "heart_rate": <number, or null if not visible>,\n'
         '  "blood_pressure": {"systolic": <number, or null>, '
         '"diastolic": <number, or null>},\n'
@@ -101,8 +123,9 @@ def build_prompt():
         "professional.\n"
         "- Do not invent, estimate, or guess a value or date that is "
         "not clearly present in the report - use null instead.\n"
-        "- Do not include any field other than heart_rate, "
-        "blood_pressure, blood_glucose, and report_date."
+        "- Do not include any field other than is_medical_report, "
+        "classification_reason, heart_rate, blood_pressure, "
+        "blood_glucose, and report_date."
     )
 
 
@@ -282,7 +305,10 @@ def parse_response(raw_response):
 
 
 # The exact set of keys build_prompt() asks Gemini to return.
-_REQUIRED_TOP_LEVEL_KEYS = {"heart_rate", "blood_pressure", "blood_glucose", "report_date"}
+_REQUIRED_TOP_LEVEL_KEYS = {
+    "is_medical_report", "classification_reason",
+    "heart_rate", "blood_pressure", "blood_glucose", "report_date",
+}
 _REQUIRED_BLOOD_PRESSURE_KEYS = {"systolic", "diastolic"}
 
 
@@ -321,7 +347,9 @@ def validate_schema(parsed_response):
     Check that `parsed_response` has exactly the structure build_prompt()
     asked Gemini for:
 
-        {"heart_rate": number or null,
+        {"is_medical_report": true or false,
+         "classification_reason": non-empty string,
+         "heart_rate": number or null,
          "blood_pressure": null or {"systolic": number or null,
                                      "diastolic": number or null},
          "blood_glucose": number or null,
@@ -330,7 +358,12 @@ def validate_schema(parsed_response):
     This only checks *shape* - the right fields, nothing extra, correct
     types, and (for report_date) a genuinely valid calendar date. It
     never judges whether a value is medically normal, high, low, or
-    dangerous; that interpretation belongs to logic_manager.py.
+    dangerous; that interpretation belongs to logic_manager.py. It also
+    does not judge whether the *document itself* is a medical report -
+    it only checks that Gemini's is_medical_report/classification_reason
+    answer has the right shape, not whether the answer is correct (that
+    is a judgment call Gemini already made, not something this
+    structural check can verify).
 
     Args:
         parsed_response: the value returned by parse_response().
@@ -343,6 +376,13 @@ def validate_schema(parsed_response):
         return False
 
     if set(parsed_response.keys()) != _REQUIRED_TOP_LEVEL_KEYS:
+        return False
+
+    if not isinstance(parsed_response["is_medical_report"], bool):
+        return False
+
+    classification_reason = parsed_response["classification_reason"]
+    if not isinstance(classification_reason, str) or not classification_reason.strip():
         return False
 
     if not _is_number_or_null(parsed_response["heart_rate"]):
@@ -511,15 +551,23 @@ def call_ai_with_retry(file_bytes, mime_type, prompt, max_retries=AI_MAX_RETRIES
     An attempt that fails any of these three checks (including a
     network/API failure from call_ai(), which comes back as an error
     JSON object that fails validate_schema()) is discarded and the loop
-    tries again, up to `max_retries` times total - WITH ONE EXCEPTION:
-    if every extracted MEASUREMENT is confirmed but report_date alone
-    could not be re-confirmed, this does not throw away an otherwise-
-    trustworthy extraction and spend two more API calls retrying from
-    scratch (one call was already spent confirming the measurements are
-    genuine). It accepts the result with report_date set to None
-    instead - a date that merely couldn't be double-checked is not
-    evidence it was invented, unlike a measurement failing the same
-    check, which still triggers a full retry.
+    tries again, up to `max_retries` times total - WITH TWO EXCEPTIONS:
+
+    - If Gemini confidently classifies the document as NOT a medical
+      report (is_medical_report is False), that result is returned
+      immediately rather than retried. It is a deterministic answer to
+      a classification question, not a value that could have been
+      "invented" - there is nothing left to source-verify (every
+      measurement is null by instruction), and retrying would only
+      waste quota re-asking Gemini the same question.
+    - If every extracted MEASUREMENT is confirmed but report_date alone
+      could not be re-confirmed, this does not throw away an otherwise-
+      trustworthy extraction and spend two more API calls retrying from
+      scratch (one call was already spent confirming the measurements
+      are genuine). It accepts the result with report_date set to None
+      instead - a date that merely couldn't be double-checked is not
+      evidence it was invented, unlike a measurement failing the same
+      check, which still triggers a full retry.
 
     Args:
         file_bytes: bytes - the raw content of the medical report file.
@@ -539,6 +587,14 @@ def call_ai_with_retry(file_bytes, mime_type, prompt, max_retries=AI_MAX_RETRIES
 
         if not validate_schema(parsed):
             continue
+
+        # A confident "this isn't a medical report" classification is a
+        # deterministic answer, not an untrustworthy one - there is
+        # nothing to source-verify (build_prompt() tells Gemini to
+        # leave every measurement null in this case) and retrying from
+        # scratch would only waste quota re-asking the same question.
+        if parsed["is_medical_report"] is False:
+            return parsed
 
         # One verification call per attempt, not one per field and not
         # one per fallback check - verify_source() is not called here

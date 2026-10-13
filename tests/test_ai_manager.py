@@ -36,6 +36,21 @@ import ai_manager
 # ---------------------------------------------------------------------------
 
 VALID_RESPONSE_ALL_NULL = json.dumps({
+    "is_medical_report": True,
+    "classification_reason": "Document appears to be a medical report.",
+    "heart_rate": None,
+    "blood_pressure": None,
+    "blood_glucose": None,
+    "report_date": None,
+})
+
+# The exact dict shape VALID_RESPONSE_ALL_NULL parses to - call_ai_with_retry()
+# returns this whole dict (not just the four measurement fields) on success.
+PARSED_RESPONSE_ALL_NULL = json.loads(VALID_RESPONSE_ALL_NULL)
+
+NOT_A_MEDICAL_REPORT_RESPONSE = json.dumps({
+    "is_medical_report": False,
+    "classification_reason": "Contains an exam timetable, no clinical content.",
     "heart_rate": None,
     "blood_pressure": None,
     "blood_glucose": None,
@@ -85,8 +100,17 @@ def test_parse_response_rejects_non_string_input():
 # Unit tests: validate_schema()
 # ---------------------------------------------------------------------------
 
+# Spread into every fixture below so each test only has to spell out the
+# fields it actually cares about varying.
+_BASE_CLASSIFICATION = {
+    "is_medical_report": True,
+    "classification_reason": "Document appears to be a medical report.",
+}
+
+
 def test_validate_schema_accepts_fully_valid_response():
     response = {
+        **_BASE_CLASSIFICATION,
         "heart_rate": 72,
         "blood_pressure": {"systolic": 120, "diastolic": 80},
         "blood_glucose": 5.5,
@@ -99,6 +123,7 @@ def test_validate_schema_accepts_null_for_genuinely_missing_measurement():
     # The key IS present here - a null VALUE means "the report really
     # doesn't contain this measurement", which is valid by design.
     response = {
+        **_BASE_CLASSIFICATION,
         "heart_rate": 72,
         "blood_pressure": {"systolic": 120, "diastolic": 80},
         "blood_glucose": None,
@@ -111,6 +136,7 @@ def test_validate_schema_rejects_completely_missing_key():
     # blood_glucose is missing entirely here - different from being
     # present with a null value (see test above).
     response = {
+        **_BASE_CLASSIFICATION,
         "heart_rate": 72,
         "blood_pressure": {"systolic": 120, "diastolic": 80},
         "report_date": "2026-10-10",
@@ -120,6 +146,7 @@ def test_validate_schema_rejects_completely_missing_key():
 
 def test_validate_schema_rejects_unexpected_extra_key():
     response = {
+        **_BASE_CLASSIFICATION,
         "heart_rate": 72,
         "blood_pressure": {"systolic": 120, "diastolic": 80},
         "blood_glucose": None,
@@ -131,6 +158,7 @@ def test_validate_schema_rejects_unexpected_extra_key():
 
 def test_validate_schema_rejects_wrong_type_for_heart_rate():
     response = {
+        **_BASE_CLASSIFICATION,
         "heart_rate": ["72"],
         "blood_pressure": {"systolic": 120, "diastolic": 80},
         "blood_glucose": None,
@@ -141,6 +169,7 @@ def test_validate_schema_rejects_wrong_type_for_heart_rate():
 
 def test_validate_schema_accepts_null_blood_pressure():
     response = {
+        **_BASE_CLASSIFICATION,
         "heart_rate": 72,
         "blood_pressure": None,
         "blood_glucose": 5.5,
@@ -151,6 +180,7 @@ def test_validate_schema_accepts_null_blood_pressure():
 
 def test_validate_schema_rejects_blood_pressure_missing_diastolic():
     response = {
+        **_BASE_CLASSIFICATION,
         "heart_rate": 72,
         "blood_pressure": {"systolic": 120},
         "blood_glucose": None,
@@ -163,6 +193,7 @@ def test_validate_schema_rejects_boolean_disguised_as_number():
     # bool is a subclass of int in Python - True/False must not be
     # mistaken for a valid numeric measurement.
     response = {
+        **_BASE_CLASSIFICATION,
         "heart_rate": True,
         "blood_pressure": None,
         "blood_glucose": None,
@@ -177,11 +208,66 @@ def test_validate_schema_rejects_non_dict_input():
 
 
 # ---------------------------------------------------------------------------
+# Unit tests: validate_schema() - document classification (is_medical_report)
+# ---------------------------------------------------------------------------
+
+def test_validate_schema_accepts_confident_non_medical_classification():
+    # A confident "this is not a medical report" answer is itself a
+    # structurally valid response - rejection is decided later, by
+    # call_ai_with_retry()/logic_manager, not by validate_schema().
+    response = {
+        "is_medical_report": False,
+        "classification_reason": "Contains an exam timetable, not a medical report.",
+        "heart_rate": None,
+        "blood_pressure": None,
+        "blood_glucose": None,
+        "report_date": None,
+    }
+    assert ai_manager.validate_schema(response) is True
+
+
+def test_validate_schema_rejects_missing_is_medical_report_key():
+    response = {
+        "classification_reason": "Looks like a medical report.",
+        "heart_rate": 72,
+        "blood_pressure": None,
+        "blood_glucose": None,
+        "report_date": None,
+    }
+    assert ai_manager.validate_schema(response) is False
+
+
+def test_validate_schema_rejects_non_boolean_is_medical_report():
+    response = {
+        **_BASE_CLASSIFICATION,
+        "is_medical_report": "yes",
+        "heart_rate": 72,
+        "blood_pressure": None,
+        "blood_glucose": None,
+        "report_date": None,
+    }
+    assert ai_manager.validate_schema(response) is False
+
+
+def test_validate_schema_rejects_empty_classification_reason():
+    response = {
+        "is_medical_report": True,
+        "classification_reason": "   ",
+        "heart_rate": 72,
+        "blood_pressure": None,
+        "blood_glucose": None,
+        "report_date": None,
+    }
+    assert ai_manager.validate_schema(response) is False
+
+
+# ---------------------------------------------------------------------------
 # Unit tests: validate_schema() - report_date specifically
 # ---------------------------------------------------------------------------
 
 def test_validate_schema_accepts_null_report_date():
     response = {
+        **_BASE_CLASSIFICATION,
         "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
         "report_date": None,
     }
@@ -190,6 +276,7 @@ def test_validate_schema_accepts_null_report_date():
 
 def test_validate_schema_accepts_well_formed_report_date():
     response = {
+        **_BASE_CLASSIFICATION,
         "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
         "report_date": "2026-01-05",
     }
@@ -202,6 +289,7 @@ def test_validate_schema_rejects_wrong_format_report_date():
     # Gemini to always answer in YYYY-MM-DD); validate_schema() only
     # checks that the answer actually came back in that format.
     response = {
+        **_BASE_CLASSIFICATION,
         "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
         "report_date": "05/01/2026",
     }
@@ -212,6 +300,7 @@ def test_validate_schema_rejects_impossible_calendar_date():
     # Shaped correctly (YYYY-MM-DD) but "month 13" isn't a real month -
     # only an actual parse (not just a format/regex check) catches this.
     response = {
+        **_BASE_CLASSIFICATION,
         "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
         "report_date": "2026-13-40",
     }
@@ -220,6 +309,7 @@ def test_validate_schema_rejects_impossible_calendar_date():
 
 def test_validate_schema_rejects_non_string_report_date():
     response = {
+        **_BASE_CLASSIFICATION,
         "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
         "report_date": 20261010,
     }
@@ -357,10 +447,7 @@ def test_invalid_response_causes_another_attempt():
             b"bytes", "application/pdf", "prompt", max_retries=3
         )
 
-    assert result == {
-        "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
-        "report_date": None,
-    }
+    assert result == PARSED_RESPONSE_ALL_NULL
     assert mock_call_ai.call_count == 2
 
 
@@ -402,6 +489,7 @@ def test_invented_value_fails_source_verification_and_exhausts_retries():
     # can never confirm is actually written in the report. Each attempt
     # makes two calls to call_ai(): one to extract, one to verify.
     extraction_response = json.dumps({
+        **_BASE_CLASSIFICATION,
         "heart_rate": None,
         "blood_pressure": None,
         "blood_glucose": 5.5,
@@ -417,6 +505,22 @@ def test_invented_value_fails_source_verification_and_exhausts_retries():
 
     assert result is None
     assert mock_call_ai.call_count == 6  # 3 attempts x (extract + verify)
+
+
+def test_call_ai_with_retry_returns_immediately_when_not_a_medical_report():
+    # A confident non-medical classification is deterministic, not an
+    # "untrustworthy" result - it must come back right away (one call,
+    # no source-verification call, no retries burned re-asking Gemini
+    # the same classification question).
+    with patch("ai_manager.call_ai") as mock_call_ai:
+        mock_call_ai.return_value = NOT_A_MEDICAL_REPORT_RESPONSE
+        result = ai_manager.call_ai_with_retry(
+            b"bytes", "application/pdf", "prompt", max_retries=3
+        )
+
+    assert result == json.loads(NOT_A_MEDICAL_REPORT_RESPONSE)
+    assert result["is_medical_report"] is False
+    assert mock_call_ai.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +541,7 @@ def test_repeated_calls_do_not_crash_or_corrupt_shared_state():
     responses = [
         "not valid json",
         json.dumps({
+            **_BASE_CLASSIFICATION,
             "heart_rate": 72,
             "blood_pressure": None,
             "blood_glucose": None,
@@ -455,10 +560,7 @@ def test_repeated_calls_do_not_crash_or_corrupt_shared_state():
             except Exception as exc:  # pragma: no cover - this must never happen
                 pytest.fail(f"call_ai_with_retry raised on iteration {i}: {exc}")
 
-        assert result == {
-            "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
-            "report_date": None,
-        }
+        assert result == PARSED_RESPONSE_ALL_NULL
 
     assert ai_manager._REQUIRED_TOP_LEVEL_KEYS == original_top_level_keys
     assert ai_manager._REQUIRED_BLOOD_PRESSURE_KEYS == original_bp_keys
