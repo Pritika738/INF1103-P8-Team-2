@@ -285,6 +285,7 @@ def save_consultation_pdf(
     pdf_bytes,
     report_date,
     username,
+    source_record_id=None,
     pdf_dir=CONSULTATION_PDF_DIR,
     summaries_file=CONSULTATION_SUMMARIES_FILE,
     max_retained=MAX_RETAINED_SUMMARY_PDFS,
@@ -295,11 +296,23 @@ def save_consultation_pdf(
     Consultation page's Summary History. Only ever touches generated
     summary PDFs and their own metadata file - never health_records.json.
 
+    This function always writes a new entry - it never checks for or
+    skips duplicates itself. Callers that need "don't save the same
+    summary twice" behaviour (e.g. the GUI, across Streamlit reruns)
+    should check find_consultation_pdf_by_source() first and only call
+    this when it returns None.
+
     Args:
         pdf_bytes: bytes - the generated PDF file's contents.
         report_date: str or None - the medical report date this summary
             covers (used in the filename/metadata; not necessarily today).
         username: str - whose summary this is.
+        source_record_id: str or None - the health record ("record_id",
+            see data_manager.save_record()) this summary was generated
+            from. Used by find_consultation_pdf_by_source() to recognise
+            "this exact summary was already saved" without relying on
+            Streamlit session state, so the check still works after a
+            page refresh, a new login, or a container restart.
         pdf_dir: str - directory PDFs are written to (overridable for
             testing).
         summaries_file: str - metadata JSON file (overridable for
@@ -308,9 +321,9 @@ def save_consultation_pdf(
             before the oldest generated one is deleted; None keeps all.
 
     Returns:
-        The new metadata dict ({"username", "report_date",
-        "generated_at", "filename"}) on success, or None if saving
-        failed.
+        The new metadata dict ({"username", "source_record_id",
+        "report_date", "generated_at", "filename", "pdf_path"}) on
+        success, or None if saving failed.
     """
     try:
         os.makedirs(pdf_dir, exist_ok=True)
@@ -337,9 +350,14 @@ def save_consultation_pdf(
 
     entry = {
         "username": username,
+        "source_record_id": source_record_id,
         "report_date": report_date,
         "generated_at": generated_at,
         "filename": filename,
+        # Stored as a path relative to the PDFs directory (not an
+        # absolute host path), since that directory can live somewhere
+        # different inside a Docker container than on the host.
+        "pdf_path": os.path.join(os.path.basename(os.path.normpath(pdf_dir)), filename),
     }
 
     summaries = load_health_records(summaries_file)
@@ -366,14 +384,52 @@ def save_consultation_pdf(
     return entry
 
 
+def find_consultation_pdf_by_source(
+    username, source_record_id, summaries_file=CONSULTATION_SUMMARIES_FILE
+):
+    """
+    Look up a previously saved consultation-summary PDF generated from
+    this exact health record, if one exists - the idempotency check
+    behind "don't save the same summary twice". Checking the persisted
+    metadata file (rather than e.g. Streamlit session state) means the
+    check still works after a page refresh, a fresh login, or a
+    container restart, not just within one running session.
+
+    Args:
+        username: str - whose summaries to search.
+        source_record_id: str or None - the health record's "record_id"
+            (see data_manager.save_record()). If falsy, this always
+            returns None - there is nothing reliable to match on, so
+            the caller should treat this the same as "not found yet"
+            rather than as a guaranteed-unique summary.
+        summaries_file: str - metadata JSON file (overridable for
+            testing).
+
+    Returns:
+        The existing metadata dict if one is already saved for this
+        user and source_record_id, otherwise None.
+    """
+    if not source_record_id:
+        return None
+
+    summaries = load_health_records(summaries_file)
+    for entry in summaries:
+        if (
+            entry.get("username") == username
+            and entry.get("source_record_id") == source_record_id
+        ):
+            return entry
+    return None
+
+
 def list_consultation_pdfs(username, summaries_file=CONSULTATION_SUMMARIES_FILE):
     """
     List previously generated consultation-summary PDFs for one user,
-    sorted by the medical report date they cover (newest first) - not
-    by when the summary itself was generated. Two summaries can share a
-    report date (e.g. regenerated after a correction); generated_at is
-    used as a tiebreaker so the most recently generated one of a tied
-    pair is listed first.
+    sorted by when each summary was actually GENERATED (newest first) -
+    not by the medical report date it covers. Two summaries can be
+    generated in the same microsecond in theory; generated_at already
+    carries microsecond precision (see save_consultation_pdf()), so no
+    further tiebreaker is needed in practice.
 
     Args:
         username: str - whose summaries to list.
@@ -387,7 +443,7 @@ def list_consultation_pdfs(username, summaries_file=CONSULTATION_SUMMARIES_FILE)
     user_entries = [s for s in summaries if s.get("username") == username]
     return sorted(
         user_entries,
-        key=lambda s: (s.get("report_date") or "", s.get("generated_at") or ""),
+        key=lambda s: s.get("generated_at") or "",
         reverse=True,
     )
 

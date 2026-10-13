@@ -50,7 +50,10 @@ _MODEL_CHAIN = list(dict.fromkeys([AI_MODEL_NAME, *AI_FALLBACK_MODELS]))
 _MODEL_UNAVAILABLE_CODES = {404, 429, 500, 502, 503, 504}
 
 # The exact set of keys build_prompt() asks Gemini to return.
-_REQUIRED_TOP_LEVEL_KEYS = {"heart_rate", "blood_pressure", "blood_glucose", "report_date"}
+_REQUIRED_TOP_LEVEL_KEYS = {
+    "is_medical_report", "classification_reason",
+    "heart_rate", "blood_pressure", "blood_glucose", "report_date",
+}
 _REQUIRED_BLOOD_PRESSURE_KEYS = {"systolic", "diastolic"}
 
 # Maps each extracted field to the key Gemini uses to confirm it during
@@ -272,7 +275,9 @@ def validate_schema(parsed_response):
     Check that `parsed_response` has exactly the structure build_prompt()
     asked Gemini for:
 
-        {"heart_rate": number or null,
+        {"is_medical_report": true or false,
+         "classification_reason": non-empty string,
+         "heart_rate": number or null,
          "blood_pressure": null or {"systolic": number or null,
                                      "diastolic": number or null},
          "blood_glucose": number or null,
@@ -280,7 +285,8 @@ def validate_schema(parsed_response):
 
     This only checks *shape* - the right fields, nothing extra, correct
     types, and a genuinely valid calendar date. It never judges whether
-    a value is medically normal; that belongs to logic_manager.py.
+    a value is medically normal, or whether Gemini's is_medical_report
+    answer is actually correct; those are not structural checks.
 
     Returns:
         True if the structure is valid, False otherwise.
@@ -290,8 +296,13 @@ def validate_schema(parsed_response):
     if set(parsed_response.keys()) != _REQUIRED_TOP_LEVEL_KEYS:
         return False
 
+    classification_reason = parsed_response["classification_reason"]
+
     return (
-        _is_number_or_null(parsed_response["heart_rate"])
+        isinstance(parsed_response["is_medical_report"], bool)
+        and isinstance(classification_reason, str)
+        and bool(classification_reason.strip())
+        and _is_number_or_null(parsed_response["heart_rate"])
         and _is_number_or_null(parsed_response["blood_glucose"])
         and _is_valid_report_date_or_null(parsed_response["report_date"])
         and _is_valid_blood_pressure_or_null(parsed_response["blood_pressure"])
@@ -368,12 +379,21 @@ def call_ai_with_retry(file_bytes, mime_type, prompt):
     3. source verification - every non-null value backed by the report?
 
     A failing attempt (including a network/API failure from call_ai(),
-    which fails validate_schema()) is discarded and retried - WITH ONE
-    EXCEPTION: if every measurement is confirmed but report_date alone
-    could not be re-confirmed, the result is accepted with report_date
-    set to None rather than spending more API calls retrying from
-    scratch. An unconfirmed date is not evidence it was invented the
-    way an unconfirmed measurement is.
+    which fails validate_schema()) is discarded and retried - WITH TWO
+    EXCEPTIONS:
+
+    - If Gemini confidently classifies the document as NOT a medical
+      report (is_medical_report is False), that result is returned
+      immediately rather than retried. It is a deterministic answer to
+      a classification question, not a value that could have been
+      "invented" - every measurement is null by instruction, so there
+      is nothing left to source-verify, and retrying would only waste
+      an API call re-asking Gemini the same question.
+    - If every measurement is confirmed but report_date alone could
+      not be re-confirmed, the result is accepted with report_date set
+      to None rather than spending more API calls retrying from
+      scratch. An unconfirmed date is not evidence it was invented the
+      way an unconfirmed measurement is.
 
     Args:
         file_bytes: bytes - the raw content of the medical report file.
@@ -392,6 +412,13 @@ def call_ai_with_retry(file_bytes, mime_type, prompt):
 
         if not validate_schema(parsed):
             continue
+
+        # A confident "this isn't a medical report" classification is a
+        # deterministic answer, not an untrustworthy one - nothing to
+        # source-verify, and retrying would just waste quota re-asking
+        # the same classification question.
+        if parsed["is_medical_report"] is False:
+            return parsed
 
         # One verification call per attempt (see _check_source_verification).
         results = _check_source_verification(file_bytes, mime_type, parsed)

@@ -387,7 +387,7 @@ def test_verify_source_treats_malformed_verification_reply_as_unsupported():
 
 def test_call_ai_handles_missing_api_key_without_crashing():
     with patch("ai_manager.get_api_key", return_value=None):
-        result = ai_manager.call_ai(b"bytes", "application/pdf", "prompt")
+        result = ai_manager.call_ai("prompt", b"bytes", "application/pdf")
     assert "error" in json.loads(result)
 
 
@@ -398,20 +398,23 @@ def test_call_ai_handles_authentication_failure_without_leaking_the_key():
     )
     with patch("ai_manager.get_api_key", return_value="super-secret-key"), \
             patch("ai_manager.genai.Client", return_value=fake_client):
-        result = ai_manager.call_ai(b"bytes", "application/pdf", "prompt")
+        result = ai_manager.call_ai("prompt", b"bytes", "application/pdf")
 
     assert "error" in json.loads(result)
     assert "super-secret-key" not in result
 
 
 def test_call_ai_handles_server_error_without_crashing():
+    # Every model in the fallback chain (see config.AI_FALLBACK_MODELS)
+    # raises the same 503, so call_ai() cycles through all of them
+    # before giving up - still a controlled error, never a crash.
     fake_client = MagicMock()
     fake_client.models.generate_content.side_effect = genai_errors.ServerError(
         503, {"error": {"message": "overloaded", "status": "UNAVAILABLE"}}
     )
     with patch("ai_manager.get_api_key", return_value="fake-key"), \
             patch("ai_manager.genai.Client", return_value=fake_client):
-        result = ai_manager.call_ai(b"bytes", "application/pdf", "prompt")
+        result = ai_manager.call_ai("prompt", b"bytes", "application/pdf")
 
     assert "error" in json.loads(result)
 
@@ -421,7 +424,7 @@ def test_call_ai_handles_network_timeout_without_crashing():
     fake_client.models.generate_content.side_effect = TimeoutError("connection timed out")
     with patch("ai_manager.get_api_key", return_value="fake-key"), \
             patch("ai_manager.genai.Client", return_value=fake_client):
-        result = ai_manager.call_ai(b"bytes", "application/pdf", "prompt")
+        result = ai_manager.call_ai("prompt", b"bytes", "application/pdf")
 
     assert "error" in json.loads(result)
 
@@ -431,9 +434,23 @@ def test_call_ai_handles_empty_response_without_crashing():
     fake_client.models.generate_content.return_value = _make_fake_gemini_response("")
     with patch("ai_manager.get_api_key", return_value="fake-key"), \
             patch("ai_manager.genai.Client", return_value=fake_client):
-        result = ai_manager.call_ai(b"bytes", "application/pdf", "prompt")
+        result = ai_manager.call_ai("prompt", b"bytes", "application/pdf")
 
     assert "error" in json.loads(result)
+
+
+def test_call_ai_works_without_a_file_for_text_only_prompts():
+    # generate_consultation_narrative() calls call_ai() with no file at
+    # all (file_bytes/mime_type default to None) - a plain text prompt.
+    fake_client = MagicMock()
+    fake_client.models.generate_content.return_value = _make_fake_gemini_response(
+        '{"narrative": "ok"}'
+    )
+    with patch("ai_manager.get_api_key", return_value="fake-key"), \
+            patch("ai_manager.genai.Client", return_value=fake_client):
+        result = ai_manager.call_ai("prompt text only")
+
+    assert json.loads(result) == {"narrative": "ok"}
 
 
 # ---------------------------------------------------------------------------
@@ -441,44 +458,36 @@ def test_call_ai_handles_empty_response_without_crashing():
 # ---------------------------------------------------------------------------
 
 def test_invalid_response_causes_another_attempt():
-    with patch("ai_manager.call_ai") as mock_call_ai:
+    with patch("ai_manager.AI_MAX_RETRIES", 3), patch("ai_manager.call_ai") as mock_call_ai:
         mock_call_ai.side_effect = [INVALID_RESPONSE, VALID_RESPONSE_ALL_NULL]
-        result = ai_manager.call_ai_with_retry(
-            b"bytes", "application/pdf", "prompt", max_retries=3
-        )
+        result = ai_manager.call_ai_with_retry(b"bytes", "application/pdf", "prompt")
 
     assert result == PARSED_RESPONSE_ALL_NULL
     assert mock_call_ai.call_count == 2
 
 
 def test_retry_recovers_after_one_bad_attempt():
-    with patch("ai_manager.call_ai") as mock_call_ai:
+    with patch("ai_manager.AI_MAX_RETRIES", 5), patch("ai_manager.call_ai") as mock_call_ai:
         mock_call_ai.side_effect = [INVALID_RESPONSE, VALID_RESPONSE_ALL_NULL]
-        result = ai_manager.call_ai_with_retry(
-            b"bytes", "application/pdf", "prompt", max_retries=5
-        )
+        result = ai_manager.call_ai_with_retry(b"bytes", "application/pdf", "prompt")
 
     assert result is not None
     assert mock_call_ai.call_count == 2  # stopped as soon as it succeeded
 
 
 def test_retry_stops_at_the_configured_limit():
-    with patch("ai_manager.call_ai") as mock_call_ai:
+    with patch("ai_manager.AI_MAX_RETRIES", 3), patch("ai_manager.call_ai") as mock_call_ai:
         mock_call_ai.side_effect = [INVALID_RESPONSE] * 10  # far more than max_retries
-        result = ai_manager.call_ai_with_retry(
-            b"bytes", "application/pdf", "prompt", max_retries=3
-        )
+        result = ai_manager.call_ai_with_retry(b"bytes", "application/pdf", "prompt")
 
     assert result is None
-    assert mock_call_ai.call_count == 3  # never exceeds max_retries
+    assert mock_call_ai.call_count == 3  # never exceeds AI_MAX_RETRIES
 
 
 def test_immediately_valid_response_needs_only_one_attempt():
-    with patch("ai_manager.call_ai") as mock_call_ai:
+    with patch("ai_manager.AI_MAX_RETRIES", 3), patch("ai_manager.call_ai") as mock_call_ai:
         mock_call_ai.return_value = VALID_RESPONSE_ALL_NULL
-        result = ai_manager.call_ai_with_retry(
-            b"bytes", "application/pdf", "prompt", max_retries=3
-        )
+        result = ai_manager.call_ai_with_retry(b"bytes", "application/pdf", "prompt")
 
     assert result is not None
     assert mock_call_ai.call_count == 1
@@ -497,11 +506,9 @@ def test_invented_value_fails_source_verification_and_exhausts_retries():
     })
     verification_response = json.dumps({"blood_glucose_supported": False})
 
-    with patch("ai_manager.call_ai") as mock_call_ai:
+    with patch("ai_manager.AI_MAX_RETRIES", 3), patch("ai_manager.call_ai") as mock_call_ai:
         mock_call_ai.side_effect = [extraction_response, verification_response] * 3
-        result = ai_manager.call_ai_with_retry(
-            b"bytes", "application/pdf", "prompt", max_retries=3
-        )
+        result = ai_manager.call_ai_with_retry(b"bytes", "application/pdf", "prompt")
 
     assert result is None
     assert mock_call_ai.call_count == 6  # 3 attempts x (extract + verify)
@@ -512,11 +519,9 @@ def test_call_ai_with_retry_returns_immediately_when_not_a_medical_report():
     # "untrustworthy" result - it must come back right away (one call,
     # no source-verification call, no retries burned re-asking Gemini
     # the same classification question).
-    with patch("ai_manager.call_ai") as mock_call_ai:
+    with patch("ai_manager.AI_MAX_RETRIES", 3), patch("ai_manager.call_ai") as mock_call_ai:
         mock_call_ai.return_value = NOT_A_MEDICAL_REPORT_RESPONSE
-        result = ai_manager.call_ai_with_retry(
-            b"bytes", "application/pdf", "prompt", max_retries=3
-        )
+        result = ai_manager.call_ai_with_retry(b"bytes", "application/pdf", "prompt")
 
     assert result == json.loads(NOT_A_MEDICAL_REPORT_RESPONSE)
     assert result["is_medical_report"] is False
@@ -551,12 +556,10 @@ def test_repeated_calls_do_not_crash_or_corrupt_shared_state():
     ]
 
     for i in range(50):
-        with patch("ai_manager.call_ai") as mock_call_ai:
+        with patch("ai_manager.AI_MAX_RETRIES", 3), patch("ai_manager.call_ai") as mock_call_ai:
             mock_call_ai.side_effect = list(responses)
             try:
-                result = ai_manager.call_ai_with_retry(
-                    b"bytes", "application/pdf", "prompt", max_retries=3
-                )
+                result = ai_manager.call_ai_with_retry(b"bytes", "application/pdf", "prompt")
             except Exception as exc:  # pragma: no cover - this must never happen
                 pytest.fail(f"call_ai_with_retry raised on iteration {i}: {exc}")
 

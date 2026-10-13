@@ -835,6 +835,39 @@ def _format_report_date(raw_date):
         return "Date Unavailable"
 
 
+def _format_summary_timestamp(raw_iso):
+    """
+    Turn a stored consultation-summary "generated_at" ISO timestamp
+    (e.g. "2026-10-13T16:20:21.865890") into a readable display format
+    ("13 Oct 2026, 4:20 PM"), in the server's local time - the same
+    time source every other timestamp in this app already uses, so
+    nothing here is suddenly on a different clock.
+
+    strftime's "%I" (12-hour) is zero-padded ("04"), which this
+    manually strips to match the requested "4:20 PM" style - there is
+    no single portable strftime code for an un-padded 12-hour across
+    both Windows and the Linux container this app also runs in.
+
+    Args:
+        raw_iso: str or None - a summary's stored "generated_at" field.
+
+    Returns:
+        A display string: either "DD Mon YYYY, H:MM AM/PM" or
+        "Unknown" if missing/unparseable.
+    """
+    if not raw_iso:
+        return "Unknown"
+    try:
+        timestamp = datetime.fromisoformat(raw_iso)
+    except ValueError:
+        return "Unknown"
+    hour_12 = timestamp.strftime("%I").lstrip("0") or "12"
+    return (
+        timestamp.strftime("%d %b %Y, ")
+        + f"{hour_12}:{timestamp.strftime('%M')} {timestamp.strftime('%p')}"
+    )
+
+
 def _format_measurement(value, unit):
     """
     Format one measurement value for display: "—" if missing, otherwise
@@ -2480,6 +2513,11 @@ def show_consultation():
     who = display_name() or "you"
     hero("Consultation Report", "A summary to bring to your appointment. Not medical advice.")
 
+    # Give any record saved before record_id existed one now - this
+    # page's automatic-save idempotency check below depends on every
+    # record having one (see source_record_id further down).
+    data_manager.backfill_record_ids()
+
     # Loaded through the Data Manager - never read the JSON file here.
     all_records = data_manager.load_health_records()
     my_records = records_for_current_user(all_records)
@@ -2503,6 +2541,15 @@ def show_consultation():
     # and build_report() below falls back to the deterministic,
     # rule-based summary rather than fabricating an AI result.
     latest_processed_record = latest_record_for_user(recent_records)
+    # Identifies WHICH health record this consultation summary is being
+    # generated from, so the automatic-save step below can recognise
+    # "this exact summary is already saved" (see
+    # data_manager.find_consultation_pdf_by_source()) instead of saving
+    # a duplicate on every Streamlit rerun.
+    source_record_id = (
+        latest_processed_record.get("record_id") if latest_processed_record else None
+    )
+
     ai_narrative = None
     if latest_processed_record:
         with st.spinner("Preparing your consultation summary..."):
@@ -2548,22 +2595,30 @@ def show_consultation():
                            data=report_text(who, report).encode("utf-8"),
                            file_name="consultation_report.txt", mime="text/plain")
     else:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.download_button("Download consultation report (PDF)", data=pdf_bytes,
-                               file_name="consultation_report.pdf",
-                               mime="application/pdf", type="primary")
-        with col2:
-            if st.button("Save to Summary History"):
-                saved_entry = data_manager.save_consultation_pdf(
-                    pdf_bytes=pdf_bytes,
-                    report_date=report_date,
-                    username=current_user(),
+        st.download_button("Download consultation report (PDF)", data=pdf_bytes,
+                           file_name="consultation_report.pdf",
+                           mime="application/pdf", type="primary")
+
+        # Automatic Summary History saving - no button to click. Gated
+        # on source_record_id so repeated Streamlit reruns of the SAME
+        # latest record (a refresh, clicking Download above, navigating
+        # away and back) never create a duplicate entry; a genuinely
+        # new latest record (a new upload) gets its own new entry.
+        existing_entry = data_manager.find_consultation_pdf_by_source(
+            current_user(), source_record_id
+        )
+        if not existing_entry:
+            saved_entry = data_manager.save_consultation_pdf(
+                pdf_bytes=pdf_bytes,
+                report_date=report_date,
+                username=current_user(),
+                source_record_id=source_record_id,
+            )
+            if not saved_entry:
+                st.error(
+                    "This summary could not be saved to Summary History. "
+                    "You can still download it above."
                 )
-                if saved_entry:
-                    st.success("Saved to Summary History below.")
-                else:
-                    st.error("Could not save this summary. Please try again.")
 
     # -------------------------------------------------
     # SUMMARY HISTORY
@@ -2583,7 +2638,7 @@ def show_consultation():
                 with cols[0]:
                     st.caption(f"Report date: {entry.get('report_date') or 'Unknown'}")
                 with cols[1]:
-                    st.caption(f"Generated {entry.get('generated_at', '')}")
+                    st.caption(f"Generated {_format_summary_timestamp(entry.get('generated_at'))}")
                 with cols[2]:
                     pdf_data = data_manager.get_consultation_pdf_bytes(entry["filename"])
                     if pdf_data:

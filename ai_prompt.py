@@ -9,7 +9,15 @@ def build_prompt():
     Build the instruction text sent to Gemini alongside an uploaded
     medical report (PDF or image).
 
-    The prompt asks Gemini to extract heart rate, blood pressure
+    The prompt first asks Gemini to classify whether the document is
+    genuinely a medical report at all (is_medical_report/
+    classification_reason) - this is what lets call_ai_with_retry()
+    reject something like an exam timetable before it ever reaches
+    Health History, Health Trends, or a consultation summary, without
+    a second API call: the same request that extracts measurements
+    also answers the classification question.
+
+    It then asks Gemini to extract heart rate, blood pressure
     (systolic/diastolic), blood glucose, and the report's own date, and
     to reply with ONLY a JSON object in an exact, fixed structure - no
     markdown, no explanation, no extra fields - so that
@@ -24,10 +32,26 @@ def build_prompt():
     """
     return (
         "You are a data extraction assistant. You will be given a "
-        "medical report as a PDF or image.\n\n"
+        "document that is claimed to be a medical report, as a PDF or "
+        "image.\n\n"
+        "STEP 1 - CLASSIFY THE DOCUMENT:\n"
+        "Decide whether this document is genuinely a medical report, "
+        "such as a lab result, vital-signs printout, examination "
+        "summary, or similar clinical document. A document can be a "
+        "valid medical report even if it only contains SOME of the "
+        "measurements below - it does not need to contain all of them. "
+        "A document is NOT a medical report if it is something "
+        "unrelated, such as a school timetable, an exam schedule, an "
+        "invoice or receipt, a resume, a random photo, or any other "
+        "non-clinical document. If you cannot confidently tell it is a "
+        "genuine medical report, treat it as NOT a medical report "
+        "rather than guessing.\n\n"
+        "STEP 2 - EXTRACT (only if it is a medical report):\n"
         "Extract the following if they are clearly visible in the "
         "report: heart rate, blood pressure (systolic and diastolic), "
-        "blood glucose, and the report's own date.\n\n"
+        "blood glucose, and the report's own date. If the document is "
+        "NOT a medical report, set all of these to null - do not "
+        "extract numbers from an unrelated document.\n\n"
         "REPORT DATE RULES:\n"
         '- The report date is the date the measurements were taken or '
         'recorded - look for labels such as "Report Date", '
@@ -49,6 +73,12 @@ def build_prompt():
         "The JSON must contain exactly these fields, with no additional "
         "fields:\n"
         "{\n"
+        '  "is_medical_report": <true or false - your STEP 1 '
+        "classification>,\n"
+        '  "classification_reason": <short string explaining your '
+        "STEP 1 decision, e.g. \"Contains lab test names and vital "
+        'sign readings\" or \"Contains an exam timetable, no clinical '
+        'content\">,\n'
         '  "heart_rate": <number, or null if not visible>,\n'
         '  "blood_pressure": {"systolic": <number, or null>, '
         '"diastolic": <number, or null>},\n'
@@ -69,8 +99,9 @@ def build_prompt():
         "professional.\n"
         "- Do not invent, estimate, or guess a value or date that is "
         "not clearly present in the report - use null instead.\n"
-        "- Do not include any field other than heart_rate, "
-        "blood_pressure, blood_glucose, and report_date."
+        "- Do not include any field other than is_medical_report, "
+        "classification_reason, heart_rate, blood_pressure, "
+        "blood_glucose, and report_date."
     )
 
 
