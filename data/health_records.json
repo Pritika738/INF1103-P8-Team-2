@@ -418,6 +418,7 @@
       }
     ],
     "flagged_trends": [],
+<<<<<<< Updated upstream
     "recent_changes": [
       {
         "metric": "Systolic Blood Pressure",
@@ -456,14 +457,24 @@
         "feedback": "Your heart rate has changed from normal (88) to severe (138) since your last record."
       }
     ],
+=======
+    "recent_changes": [],
+>>>>>>> Stashed changes
     "risk_score": 8,
     "decision": "URGENT",
     "recommended_action": "These readings fall outside typical safe ranges. Consider contacting a healthcare professional promptly rather than waiting for your next scheduled visit.",
     "requires_doctor_review": true,
     "summary": "Urgent: Systolic Blood Pressure, Diastolic Blood Pressure, Blood Glucose, Heart Rate at a level that usually warrants prompt medical attention | Please discuss these results with your doctor at your next consultation.",
+<<<<<<< Updated upstream
     "username": "test",
     "date": "2026-09-22",
     "report_id": "e4af057f60a349738cc60416f65a4758",
     "record_id": "056d20bd7f8948099f8d2ecdfd57907a"
+=======
+    "username": "tester2008",
+    "date": "2026-09-22",
+    "report_id": "38f84e54044c497cb589dc8147f4074b",
+    "record_id": "93beca287733405d85baf965a430a81c"
+>>>>>>> Stashed changes
   }
 ]
