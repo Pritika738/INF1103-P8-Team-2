@@ -2538,11 +2538,6 @@ def show_consultation():
             for n in report["notes"]:
                 st.markdown("- " + n)
 
-        if report["questions"]:
-            st.markdown("##### Questions to ask your doctor")
-            for q in report["questions"]:
-                st.markdown("- " + q)
-
     st.write("")
     pdf_bytes, err = build_pdf(who, report)
     report_date = latest_processed_record.get("date") if latest_processed_record else None
@@ -2612,12 +2607,8 @@ def build_report(who, trends, ai_narrative=None):
     purely from trends' own rule-based classifications, so a missing
     AI result is never silently presented as if it had succeeded.
     """
-    questions, notes = [], []
+    notes = []
     if trends:
-        rising = [t["metric"] for t in trends if t["direction"] == "rising"]
-        if rising:
-            questions.append("Are the upward trends in " + ", ".join(rising)
-                             + " something I should act on?")
         notes.append("Trends are based only on the records provided and are not a "
                      "diagnosis. Please confirm with your doctor.")
 
@@ -2630,7 +2621,7 @@ def build_report(who, trends, ai_narrative=None):
     else:
         summary = ""
 
-    return {"summary": summary, "questions": questions, "notes": notes, "trends": trends}
+    return {"summary": summary, "notes": notes, "trends": trends}
 
 def report_text(who, report):
     lines = ["Consultation Report for " + who,
@@ -2645,9 +2636,7 @@ def report_text(who, report):
                          + "  (" + t["note"] + ")")
         lines.append("")
     if report["notes"]:
-        lines += ["IN PLAIN LANGUAGE"] + ["- " + n for n in report["notes"]] + [""]
-    if report["questions"]:
-        lines += ["QUESTIONS TO ASK YOUR DOCTOR"] + ["- " + q for q in report["questions"]]
+        lines += ["NOTE"] + ["- " + n for n in report["notes"]] + [""]
     return chr(10).join(lines)
 
 def build_pdf(who, report):
@@ -2693,10 +2682,6 @@ def build_pdf(who, report):
             for n in report["notes"]:
                 para("- " + n)
             pdf.ln(2)
-        if report["questions"]:
-            section("Questions to ask your doctor")
-            for q in report["questions"]:
-                para("- " + q)
 
         out = pdf.output()
         if isinstance(out, (bytes, bytearray)):
