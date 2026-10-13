@@ -12,7 +12,7 @@ construction, no direct Gemini calls, and no JSON parsing/validation
 itself - all of that stays in ai_manager.py.
 """
 
-import ai_manager
+import ai_manager, ai_prompt
 from config import SUPPORTED_METRICS
 
 # MIME types this application currently accepts for medical report
@@ -124,7 +124,7 @@ def process_uploaded_report(file_bytes, mime_type):
         on success, or None if ai_manager could not produce a
         trustworthy result after retrying.
     """
-    prompt = ai_manager.build_prompt()
+    prompt = ai_prompt.build_prompt()
     return ai_manager.call_ai_with_retry(file_bytes, mime_type, prompt)
 
 

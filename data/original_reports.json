@@ -48,5 +48,25 @@
     "stored_filename": "e4af057f60a349738cc60416f65a4758.pdf",
     "mime_type": "application/pdf",
     "content_hash": "125f0c7edd8c6caadc7ae3e7feed822b2040b646f6adedd56b01097b253977cf"
+  },
+  {
+    "report_id": "395b11ad88a040c4ba46202da2b49558",
+    "username": "tester",
+    "report_date": "2026-12-01",
+    "upload_date": "2026-10-13",
+    "filename": "mock_report_moderate_2.pdf",
+    "stored_filename": "395b11ad88a040c4ba46202da2b49558.pdf",
+    "mime_type": "application/pdf",
+    "content_hash": "b1c9333c74f9a6e6a07b0e686e10772b8d8321a6c17ec81ea0dab7301ccf5f6b"
+  },
+  {
+    "report_id": "e5bd4f48c6b84803b783996e750f262a",
+    "username": "tester",
+    "report_date": "2026-09-22",
+    "upload_date": "2026-10-13",
+    "filename": "mock_report_severe.pdf",
+    "stored_filename": "e5bd4f48c6b84803b783996e750f262a.pdf",
+    "mime_type": "application/pdf",
+    "content_hash": "125f0c7edd8c6caadc7ae3e7feed822b2040b646f6adedd56b01097b253977cf"
   }
 ]

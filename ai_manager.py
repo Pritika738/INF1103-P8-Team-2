@@ -28,104 +28,121 @@ belongs to logic_manager.py.
 
 import json
 import time
+import ai_prompt
 from datetime import datetime
-
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
-from config import AI_MODEL_NAME, AI_MAX_RETRIES, BASE_DELAY, get_api_key
+from config import (AI_MODEL_NAME, AI_FALLBACK_MODELS, AI_MAX_RETRIES, BASE_DELAY, get_api_key)
 
 
-def build_prompt():
+# ---------------------------------------------------------------------------
+# Shared constants
+# ---------------------------------------------------------------------------
+
+# Primary model first, then fallbacks in priority order (duplicates removed).
+_MODEL_CHAIN = list(dict.fromkeys([AI_MODEL_NAME, *AI_FALLBACK_MODELS]))
+
+# HTTP codes meaning "this model can't serve you right now", so trying the
+# next model makes sense: not found/retired, rate limited, server errors.
+# Auth (401/403) and bad-request (400) errors are deliberately excluded -
+# another model would fail the same way.
+_MODEL_UNAVAILABLE_CODES = {404, 429, 500, 502, 503, 504}
+
+# The exact set of keys build_prompt() asks Gemini to return.
+_REQUIRED_TOP_LEVEL_KEYS = {"heart_rate", "blood_pressure", "blood_glucose", "report_date"}
+_REQUIRED_BLOOD_PRESSURE_KEYS = {"systolic", "diastolic"}
+
+# Maps each extracted field to the key Gemini uses to confirm it during
+# source verification. Single source of truth for the verification step.
+_VERIFICATION_KEYS = {
+    "heart_rate": "heart_rate_supported",
+    "blood_pressure": "blood_pressure_supported",
+    "blood_glucose": "blood_glucose_supported",
+    "report_date": "report_date_supported",
+}
+
+# ---------------------------------------------------------------------------
+# Talking to Gemini
+# ---------------------------------------------------------------------------
+
+def _error_json(message):
+    """Return a JSON string of the form {"error": message}."""
+    return json.dumps({"error": message})
+
+
+def _is_model_unavailable(exc):
+    """True if `exc` means the current model is unavailable (try the next one)."""
+    return exc.code in _MODEL_UNAVAILABLE_CODES or exc.status == "UNAVAILABLE"
+
+
+def call_ai(prompt, file_bytes=None, mime_type=None):
     """
-    Build the instruction text sent to Gemini alongside an uploaded
-    medical report (PDF or image).
+    The single place that calls Gemini. Sends `prompt`, optionally with
+    a medical report file attached, and returns the model's raw text.
+    It does not parse or validate the response or apply business rules;
+    that happens downstream.
 
-    The prompt asks Gemini to extract heart rate, blood pressure
-    (systolic/diastolic), blood glucose, and the report's own date, and
-    to reply with ONLY a JSON object in an exact, fixed structure - no
-    markdown, no explanation, no extra fields - so that
-    parse_response() and validate_schema() can reliably check what
-    comes back. It also forbids diagnosing conditions, recommending
-    treatment, or inventing values that are not actually present in the
-    report.
+    Models in _MODEL_CHAIN are tried in order. If one is unavailable
+    (see _MODEL_UNAVAILABLE_CODES) the next is tried; any other error
+    (bad key, rejected request, network failure) is returned
+    immediately, since a different model wouldn't help.
+
+    Args:
+        prompt: str - the instructions (e.g. build_prompt()).
+        file_bytes: bytes or None - the raw report file (PDF/image),
+            already read into memory by the caller. None for a
+            text-only request.
+        mime_type: str or None - required with file_bytes, e.g.
+            "application/pdf", "image/png", "image/jpeg".
 
     Returns:
-        A prompt string ready to be sent to the AI model together with
-        the report file.
+        The model's raw response text on success. On any failure
+        (missing/invalid API key, authentication failure, every model
+        unavailable, network failure, or an empty response) returns a
+        JSON error string instead of raising. The real API key is never
+        included in the message.
     """
-    return (
-        "You are a data extraction assistant. You will be given a "
-        "document that is claimed to be a medical report, as a PDF or "
-        "image.\n\n"
-        "STEP 1 - CLASSIFY THE DOCUMENT:\n"
-        "Decide whether this document is genuinely a medical report, "
-        "such as a lab result, vital-signs printout, examination "
-        "summary, or similar clinical document. A document can be a "
-        "valid medical report even if it only contains SOME of the "
-        "measurements below - it does not need to contain all of them. "
-        "A document is NOT a medical report if it is something "
-        "unrelated, such as a school timetable, an exam schedule, an "
-        "invoice or receipt, a resume, a random photo, or any other "
-        "non-clinical document. If you cannot confidently tell it is a "
-        "genuine medical report, treat it as NOT a medical report "
-        "rather than guessing.\n\n"
-        "STEP 2 - EXTRACT (only if it is a medical report):\n"
-        "Extract the following if they are clearly visible in the "
-        "report: heart rate, blood pressure (systolic and diastolic), "
-        "blood glucose, and the report's own date. If the document is "
-        "NOT a medical report, set all of these to null - do not "
-        "extract numbers from an unrelated document.\n\n"
-        "REPORT DATE RULES:\n"
-        '- The report date is the date the measurements were taken or '
-        'recorded - look for labels such as "Report Date", '
-        '"Collection Date", "Test Date", or "Date of Visit".\n'
-        "- Do NOT use the patient's date of birth.\n"
-        "- Do NOT use a document printing/generation date if a separate "
-        "report/collection/test date is also present.\n"
-        "- Do NOT assume the year is 2026, or any other specific year - "
-        "read the actual year printed in the report.\n"
-        "- The report may show the date in any common format, e.g. "
-        '"10/10/2026", "10 Oct 2026", "2026-10-10", or '
-        '"10 October 2026" - convert whichever format you find into '
-        '"YYYY-MM-DD" in your answer.\n'
-        "- If you are not confident which date is the report date, "
-        "set it to null rather than guessing.\n\n"
-        "Respond with ONLY valid JSON and nothing else - no markdown "
-        "formatting, no code fences (```), no explanation, and no text "
-        "before or after the JSON.\n\n"
-        "The JSON must contain exactly these fields, with no additional "
-        "fields:\n"
-        "{\n"
-        '  "is_medical_report": <true or false - your STEP 1 '
-        "classification>,\n"
-        '  "classification_reason": <short string explaining your '
-        "STEP 1 decision, e.g. \"Contains lab test names and vital "
-        'sign readings\" or \"Contains an exam timetable, no clinical '
-        'content\">,\n'
-        '  "heart_rate": <number, or null if not visible>,\n'
-        '  "blood_pressure": {"systolic": <number, or null>, '
-        '"diastolic": <number, or null>},\n'
-        '  "blood_glucose": <number, or null if not visible>,\n'
-        '  "report_date": <"YYYY-MM-DD" string, or null if not '
-        "confidently identifiable>\n"
-        "}\n\n"
-        'If no blood pressure reading is visible at all, set '
-        '"blood_pressure" itself to null instead of guessing either '
-        "value.\n\n"
-        "Rules you must follow:\n"
-        "- Do not diagnose any medical condition.\n"
-        "- Do not prescribe or suggest any medication.\n"
-        "- Do not recommend starting, stopping, or changing any "
-        "medication or dosage.\n"
-        "- Do not recommend any treatment plan.\n"
-        "- Do not claim to replace a doctor or qualified healthcare "
-        "professional.\n"
-        "- Do not invent, estimate, or guess a value or date that is "
-        "not clearly present in the report - use null instead.\n"
-        "- Do not include any field other than is_medical_report, "
-        "classification_reason, heart_rate, blood_pressure, "
-        "blood_glucose, and report_date."
+    api_key = get_api_key()
+    if not api_key:
+        return _error_json("AI API key not configured.")
+
+    contents = [prompt]
+    if file_bytes is not None:
+        if not mime_type:
+            return _error_json("A file was provided without a MIME type.")
+        contents.append(types.Part.from_bytes(data=file_bytes, mime_type=mime_type))
+
+    client = genai.Client(api_key=api_key)
+
+    for model_name in _MODEL_CHAIN:
+        print(f"\nPrompting {model_name}.....")
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+            )
+        except genai_errors.APIError as exc:
+            if exc.code in (401, 403):
+                return _error_json(
+                    "Authentication with the AI service failed. "
+                    "Check that GEMINI_API_KEY is set correctly."
+                )
+            if _is_model_unavailable(exc):
+                continue  # try the next model in the chain
+            return _error_json("The AI service rejected the request.")
+        except Exception:
+            return _error_json(
+                "Could not reach the AI service due to a network or unexpected error."
+            )
+
+        if not response or not getattr(response, "text", None):
+            return _error_json("The AI service returned an empty response.")
+
+        return response.text
+
+    return _error_json(
+        "The AI service is currently unavailable. Please try again later."
     )
 
 
@@ -137,23 +154,20 @@ def extract_fields(uploaded_file, prompt, schema):
 
     This is an alternative extraction path to build_prompt() +
     call_ai_with_retry(): it uses Gemini's native structured-output
-    feature (response_schema) so Gemini itself enforces the shape,
-    instead of manually prompting for JSON and parsing/validating it
-    by hand. It is not part of the active upload pipeline (see
-    io_manager.process_uploaded_report(), which uses call_ai_with_retry()).
+    feature (response_schema) so Gemini itself enforces the shape. It
+    is not part of the active upload pipeline (see
+    io_manager.process_uploaded_report(), which uses
+    call_ai_with_retry()).
 
     Args:
         uploaded_file: a file-like object with a `.type` attribute
             (e.g. a Streamlit UploadedFile) to send to Gemini.
         prompt: str - instructions describing what to extract.
-        schema: a Pydantic model class describing the desired output
-            shape.
+        schema: a Pydantic model class describing the desired output.
 
     Returns:
         A dict parsed from Gemini's structured JSON response on
-        success. Returns None on failure (the model stayed busy for
-        every retry, or any other API error) instead of raising - the
-        caller never has to wrap this in a try/except.
+        success, or None on failure (never raises).
     """
     client = genai.Client(api_key=get_api_key())
 
@@ -162,154 +176,57 @@ def extract_fields(uploaded_file, prompt, schema):
         config=types.UploadFileConfig(mime_type=uploaded_file.type),
     )
 
-    parsed = None
     try:
-        for attempt in range(1, AI_MAX_RETRIES + 1):
-            try:
-                response = client.models.generate_content(
-                    model=AI_MODEL_NAME,
-                    contents=[uploaded_file, prompt],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=schema,
-                        temperature=0.1,
-                    ),
-                )
-                parsed = parse_response(response.text)
-                break  # exits the retry loop on a successful response
-            except genai_errors.APIError as exc:
-                model_is_busy = exc.code == 503 or exc.status == "UNAVAILABLE"
-                if model_is_busy and attempt < AI_MAX_RETRIES:
-                    time.sleep(BASE_DELAY)
-                    continue
-                return None
-            except Exception:
-                return None
+        for model_name in _MODEL_CHAIN:
+            for attempt in range(AI_MAX_RETRIES):
+                print(f"\nExtracting with {model_name} \nAttempt: {attempt + 1}.....")
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=[uploaded_file, prompt],
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=schema,
+                            temperature=0.1,
+                        ),
+                    )
+                    print("Extraction Complete!")
+                    return parse_response(response.text)
+                except genai_errors.APIError as exc:
+                    if not _is_model_unavailable(exc):
+                        return None  # e.g. auth/bad request: no model will help
+                    if attempt < AI_MAX_RETRIES:
+                        time.sleep(BASE_DELAY)  # retry same model first
+                        continue
+                    break  # retries exhausted: move on to the next model
+                except Exception:
+                    return None
     finally:
-        # Always clean up the uploaded file on Gemini's servers, even
-        # if every attempt above failed or raised.
+        # Always clean up the uploaded file on Gemini's servers.
         client.files.delete(name=gemini_file.name)
 
-    return parsed
-
-def call_ai(file_bytes, mime_type, prompt):
-    """
-    Send a prepared medical report (PDF or image, already read into
-    memory by the caller) together with the extraction prompt to the
-    configured Gemini model, and return its raw text response.
-
-    This function only talks to the AI - it does not parse the response
-    as JSON, validate its structure, or apply any business rules. That
-    happens later, downstream of this function.
-
-    Args:
-        file_bytes: bytes - the raw content of the medical report file.
-        mime_type: str - the file's MIME type, e.g. "application/pdf",
-            "image/png", or "image/jpeg".
-        prompt: str - the extraction instructions (see build_prompt()).
-
-    Returns:
-        The model's raw response text on success. On any failure
-        (missing/invalid API key, authentication failure, network/API
-        failure, or an empty response) this returns a JSON string
-        describing the problem instead of raising an exception. The
-        real API key is never included in that error message.
-    """
-    api_key = get_api_key()
-    if not api_key:
-        return json.dumps({"error": "AI API key not configured."})
-
-    try:
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=AI_MODEL_NAME,
-            contents=[
-                prompt,
-                types.Part.from_bytes(data=file_bytes, mime_type=mime_type),
-            ],
-        )
-    except genai_errors.ClientError as exc:
-        if exc.code in (401, 403):
-            return json.dumps({
-                "error": "Authentication with the AI service failed. "
-                         "Check that GEMINI_API_KEY is set correctly."
-            })
-        return json.dumps({"error": "The AI service rejected the request."})
-    except genai_errors.APIError:
-        return json.dumps({
-            "error": "The AI service is currently unavailable. Please try again later."
-        })
-    except Exception:
-        return json.dumps({
-            "error": "Could not reach the AI service due to a network or unexpected error."
-        })
-
-    if not response or not getattr(response, "text", None):
-        return json.dumps({"error": "The AI service returned an empty response."})
-
-    return response.text
+    return None
 
 
-def call_ai_api(prompt):
-    """
-    Send `prompt` to the configured Gemini model (AI_MODEL_NAME) using
-    the API key from config.get_api_key(), and return the raw response
-    text.
-
-    Args:
-        prompt: str prompt to send to the AI.
-
-    Returns:
-        The model's response text on success. On failure (missing key,
-        network error, API error) returns a JSON string describing the
-        error instead of raising an exception, so callers never have to
-        wrap this in a try/except.
-    """
-    api_key = get_api_key()
-    if not api_key:
-        return json.dumps({"error": "AI API key not configured."})
-
-    try:
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=AI_MODEL_NAME,
-            contents=prompt,
-        )
-        return response.text
-    except Exception as exc:
-        return json.dumps({"error": f"AI API call failed: {exc}"})
-
+# ---------------------------------------------------------------------------
+# Parsing and validation
+# ---------------------------------------------------------------------------
 
 def parse_response(raw_response):
     """
     Safely convert Gemini's raw response text into a Python dictionary.
 
-    Args:
-        raw_response: str - the raw text returned by call_ai().
-
     Returns:
         A dict if `raw_response` is valid JSON representing a JSON
-        object. Returns None if the text is missing, not valid JSON, or
-        valid JSON that isn't an object (e.g. a list or a bare number).
-        Never raises an exception itself.
+        object; None if it is missing, invalid JSON, or not an object.
+        Never raises.
     """
     try:
         parsed = json.loads(raw_response)
     except (json.JSONDecodeError, TypeError):
         return None
 
-    if not isinstance(parsed, dict):
-        return None
-
-    return parsed
-
-
-# The exact set of keys build_prompt() asks Gemini to return.
-_REQUIRED_TOP_LEVEL_KEYS = {
-    "is_medical_report", "classification_reason",
-    "heart_rate", "blood_pressure", "blood_glucose", "report_date",
-}
-_REQUIRED_BLOOD_PRESSURE_KEYS = {"systolic", "diastolic"}
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _is_number_or_null(value):
@@ -327,9 +244,8 @@ def _is_number_or_null(value):
 def _is_valid_report_date_or_null(value):
     """
     True if `value` is None, or a string that is both shaped like
-    "YYYY-MM-DD" AND an actual, real calendar date (rejects things like
-    "2026-13-40", which only a real parse - not just a format check -
-    can catch).
+    "YYYY-MM-DD" AND a real calendar date (rejects e.g. "2026-13-40",
+    which only a real parse - not just a format check - can catch).
     """
     if value is None:
         return True
@@ -342,232 +258,122 @@ def _is_valid_report_date_or_null(value):
     return True
 
 
+def _is_valid_blood_pressure_or_null(value):
+    """True if `value` is None or {"systolic": number/null, "diastolic": number/null}."""
+    if value is None:
+        return True
+    if not isinstance(value, dict) or set(value.keys()) != _REQUIRED_BLOOD_PRESSURE_KEYS:
+        return False
+    return all(_is_number_or_null(reading) for reading in value.values())
+
+
 def validate_schema(parsed_response):
     """
     Check that `parsed_response` has exactly the structure build_prompt()
     asked Gemini for:
 
-        {"is_medical_report": true or false,
-         "classification_reason": non-empty string,
-         "heart_rate": number or null,
+        {"heart_rate": number or null,
          "blood_pressure": null or {"systolic": number or null,
                                      "diastolic": number or null},
          "blood_glucose": number or null,
          "report_date": "YYYY-MM-DD" string or null}
 
     This only checks *shape* - the right fields, nothing extra, correct
-    types, and (for report_date) a genuinely valid calendar date. It
-    never judges whether a value is medically normal, high, low, or
-    dangerous; that interpretation belongs to logic_manager.py. It also
-    does not judge whether the *document itself* is a medical report -
-    it only checks that Gemini's is_medical_report/classification_reason
-    answer has the right shape, not whether the answer is correct (that
-    is a judgment call Gemini already made, not something this
-    structural check can verify).
-
-    Args:
-        parsed_response: the value returned by parse_response().
+    types, and a genuinely valid calendar date. It never judges whether
+    a value is medically normal; that belongs to logic_manager.py.
 
     Returns:
-        True if the structure is valid, False otherwise (missing,
-        additional, or malformed fields).
+        True if the structure is valid, False otherwise.
     """
     if not isinstance(parsed_response, dict):
         return False
-
     if set(parsed_response.keys()) != _REQUIRED_TOP_LEVEL_KEYS:
         return False
 
-    if not isinstance(parsed_response["is_medical_report"], bool):
-        return False
-
-    classification_reason = parsed_response["classification_reason"]
-    if not isinstance(classification_reason, str) or not classification_reason.strip():
-        return False
-
-    if not _is_number_or_null(parsed_response["heart_rate"]):
-        return False
-
-    if not _is_number_or_null(parsed_response["blood_glucose"]):
-        return False
-
-    if not _is_valid_report_date_or_null(parsed_response["report_date"]):
-        return False
-
-    blood_pressure = parsed_response["blood_pressure"]
-    if blood_pressure is not None:
-        if not isinstance(blood_pressure, dict):
-            return False
-
-        if set(blood_pressure.keys()) != _REQUIRED_BLOOD_PRESSURE_KEYS:
-            return False
-
-        if not _is_number_or_null(blood_pressure["systolic"]):
-            return False
-
-        if not _is_number_or_null(blood_pressure["diastolic"]):
-            return False
-
-    return True
-
-
-def build_verification_prompt(parsed_response):
-    """
-    Build a prompt asking Gemini to re-check the (same) medical report
-    and confirm whether each non-null extracted value is explicitly
-    present in it - a source/grounding check, not a medical judgment.
-
-    Args:
-        parsed_response: dict already confirmed by validate_schema() to
-            have the expected shape.
-
-    Returns:
-        A prompt string ready to be sent to the AI model together with
-        the same report file used for extraction.
-    """
     return (
-        "You will be given a medical report again, along with a set of "
-        "values that were previously extracted from it.\n\n"
-        "For EACH extracted value below that is not null, check whether "
-        "that exact value is explicitly written in the report. Only "
-        "check whether the number or date is actually present in the "
-        "document - do not judge whether a measurement is medically "
-        "normal, abnormal, high, or low, and do not judge whether a "
-        "date is plausible, only whether it is the one printed in the "
-        "report.\n\n"
-        f"Extracted values to check:\n{json.dumps(parsed_response)}\n\n"
-        "Respond with ONLY valid JSON and nothing else - no markdown, no "
-        "explanation - in exactly this structure:\n"
-        "{\n"
-        '  "heart_rate_supported": <true or false>,\n'
-        '  "blood_pressure_supported": <true or false>,\n'
-        '  "blood_glucose_supported": <true or false>,\n'
-        '  "report_date_supported": <true or false>\n'
-        "}\n\n"
-        "Set a field to false if the corresponding value cannot be "
-        "found in the report, or if the extracted value was null."
+        _is_number_or_null(parsed_response["heart_rate"])
+        and _is_number_or_null(parsed_response["blood_glucose"])
+        and _is_valid_report_date_or_null(parsed_response["report_date"])
+        and _is_valid_blood_pressure_or_null(parsed_response["blood_pressure"])
     )
 
 
-_MEASUREMENT_SUPPORTED_FIELDS = {
-    "heart_rate_supported", "blood_pressure_supported", "blood_glucose_supported",
-}
-
+# ---------------------------------------------------------------------------
+# Source verification
+# ---------------------------------------------------------------------------
 
 def _check_source_verification(file_bytes, mime_type, parsed_response):
     """
     Ask Gemini, in a SINGLE call, to re-check the original report and
     confirm whether each non-null value in `parsed_response` is
-    actually backed by it - the shared mechanics behind verify_source()
-    and call_ai_with_retry()'s more selective date-dropping shortcut,
-    so neither of them makes its own separate verification call.
+    actually backed by it. Shared by verify_source() and
+    call_ai_with_retry() so neither makes its own separate call.
 
     Args:
-        file_bytes: bytes - the same medical report file used for
-            extraction.
+        file_bytes: bytes - the same report file used for extraction.
         mime_type: str - the file's MIME type (see call_ai()).
-        parsed_response: dict already confirmed by validate_schema() to
-            have the expected shape.
+        parsed_response: dict already confirmed by validate_schema().
 
     Returns:
         A dict like {"heart_rate_supported": True, ...} with one entry
-        per non-null field that was checked (empty if nothing was
-        extracted - trivially nothing to invent). None if the
-        verification call itself failed or returned something unusable
-        - callers should treat None as a failure, the same as any
-        field being False.
+        per non-null field (empty if nothing was extracted - trivially
+        nothing to invent). None if the verification call failed or
+        returned something unusable; callers should treat None as a
+        failure.
     """
-    fields_to_check = []
-    if parsed_response.get("heart_rate") is not None:
-        fields_to_check.append("heart_rate_supported")
-    if parsed_response.get("blood_pressure") is not None:
-        fields_to_check.append("blood_pressure_supported")
-    if parsed_response.get("blood_glucose") is not None:
-        fields_to_check.append("blood_glucose_supported")
-    if parsed_response.get("report_date") is not None:
-        fields_to_check.append("report_date_supported")
-
-    if not fields_to_check:
-        # Nothing was extracted, so there is nothing that could have
-        # been invented - trivially supported.
+    keys_to_check = [
+        verification_key
+        for field, verification_key in _VERIFICATION_KEYS.items()
+        if parsed_response.get(field) is not None
+    ]
+    if not keys_to_check:
         return {}
 
-    verification_prompt = build_verification_prompt(parsed_response)
-    raw_verification = call_ai(file_bytes, mime_type, verification_prompt)
+    raw_verification = call_ai(
+        ai_prompt.build_verification_prompt(parsed_response), file_bytes, mime_type
+    )
     verification = parse_response(raw_verification)
-
-    if not isinstance(verification, dict):
+    if verification is None:
         return None
 
-    return {
-        field_name: verification.get(field_name) is True
-        for field_name in fields_to_check
-    }
+    return {key: verification.get(key) is True for key in keys_to_check}
 
 
 def verify_source(file_bytes, mime_type, parsed_response):
     """
-    Ask Gemini to re-check the original report and confirm that every
-    non-null value in `parsed_response` is actually backed by it.
-
-    This exists to catch responses that are structurally valid (correct
-    JSON, correct types) but where Gemini invented a value that is not
-    actually present in the source document. It only checks presence in
-    the source, never medical plausibility.
-
-    Args:
-        file_bytes: bytes - the same medical report file used for
-            extraction.
-        mime_type: str - the file's MIME type (see call_ai()).
-        parsed_response: dict already confirmed by validate_schema() to
-            have the expected shape.
+    Confirm that every non-null value in `parsed_response` is actually
+    backed by the original report (presence only, never medical
+    plausibility).
 
     Returns:
-        True if every non-null value is confirmed as present in the
-        report. False if any value is not confirmed, or if the
-        verification call itself failed or returned something
-        unusable - callers should treat False the same as any other
-        validation failure.
+        True if every non-null value is confirmed. False if any is not
+        confirmed, or if the verification call itself failed.
     """
     results = _check_source_verification(file_bytes, mime_type, parsed_response)
-    if results is None:
-        return False
-    return all(results.values())
+    return results is not None and all(results.values())
 
 
-def call_ai_with_retry(file_bytes, mime_type, prompt, max_retries=AI_MAX_RETRIES):
+# ---------------------------------------------------------------------------
+# Full extraction pipeline
+# ---------------------------------------------------------------------------
+
+def call_ai_with_retry(file_bytes, mime_type, prompt):
     """
-    Call the AI up to `max_retries` times, parsing, schema-validating,
-    and source-verifying each response, until a fully trustworthy one
-    is obtained.
+    Call the AI up to `max_retries` times until a fully trustworthy
+    response is obtained.
 
     Every attempt must pass three checks in order:
-    1. parse_response() - is it valid JSON representing an object?
-    2. validate_schema() - does it have exactly the expected fields
-       and types?
-    3. verify_source() - is every non-null value actually backed by
-       the report, rather than invented?
+    1. parse_response()   - valid JSON object?
+    2. validate_schema()  - exactly the expected fields and types?
+    3. source verification - every non-null value backed by the report?
 
-    An attempt that fails any of these three checks (including a
-    network/API failure from call_ai(), which comes back as an error
-    JSON object that fails validate_schema()) is discarded and the loop
-    tries again, up to `max_retries` times total - WITH TWO EXCEPTIONS:
-
-    - If Gemini confidently classifies the document as NOT a medical
-      report (is_medical_report is False), that result is returned
-      immediately rather than retried. It is a deterministic answer to
-      a classification question, not a value that could have been
-      "invented" - there is nothing left to source-verify (every
-      measurement is null by instruction), and retrying would only
-      waste quota re-asking Gemini the same question.
-    - If every extracted MEASUREMENT is confirmed but report_date alone
-      could not be re-confirmed, this does not throw away an otherwise-
-      trustworthy extraction and spend two more API calls retrying from
-      scratch (one call was already spent confirming the measurements
-      are genuine). It accepts the result with report_date set to None
-      instead - a date that merely couldn't be double-checked is not
-      evidence it was invented, unlike a measurement failing the same
-      check, which still triggers a full retry.
+    A failing attempt (including a network/API failure from call_ai(),
+    which fails validate_schema()) is discarded and retried - WITH ONE
+    EXCEPTION: if every measurement is confirmed but report_date alone
+    could not be re-confirmed, the result is accepted with report_date
+    set to None rather than spending more API calls retrying from
+    scratch. An unconfirmed date is not evidence it was invented the
+    way an unconfirmed measurement is.
 
     Args:
         file_bytes: bytes - the raw content of the medical report file.
@@ -576,30 +382,18 @@ def call_ai_with_retry(file_bytes, mime_type, prompt, max_retries=AI_MAX_RETRIES
         max_retries: int maximum number of attempts.
 
     Returns:
-        A validated, source-verified response dict on success, or None
-        if every attempt failed - a controlled failure the caller can
-        check for (e.g. `if result is None: ...`) instead of the
-        program crashing or an untrustworthy value being used.
+        A validated, source-verified dict on success, or None if every
+        attempt failed.
     """
-    for _ in range(max_retries):
-        raw_response = call_ai(file_bytes, mime_type, prompt)
+    for attempt in range(AI_MAX_RETRIES):
+        raw_response = call_ai(prompt, file_bytes, mime_type)
+        print(f"\nAttempt: {attempt + 1}.....")
         parsed = parse_response(raw_response)
 
         if not validate_schema(parsed):
             continue
 
-        # A confident "this isn't a medical report" classification is a
-        # deterministic answer, not an untrustworthy one - there is
-        # nothing to source-verify (build_prompt() tells Gemini to
-        # leave every measurement null in this case) and retrying from
-        # scratch would only waste quota re-asking the same question.
-        if parsed["is_medical_report"] is False:
-            return parsed
-
-        # One verification call per attempt, not one per field and not
-        # one per fallback check - verify_source() is not called here
-        # separately, since that would mean a second, duplicate API
-        # call for the exact same check.
+        # One verification call per attempt (see _check_source_verification).
         results = _check_source_verification(file_bytes, mime_type, parsed)
         if results is None:
             continue
@@ -607,83 +401,22 @@ def call_ai_with_retry(file_bytes, mime_type, prompt, max_retries=AI_MAX_RETRIES
         if all(results.values()):
             return parsed
 
-        measurement_results = {
-            field: value for field, value in results.items()
-            if field in _MEASUREMENT_SUPPORTED_FIELDS
-        }
-        date_was_the_only_problem = (
-            results.get("report_date_supported") is False
-            and all(measurement_results.values())
+        measurements_all_supported = all(
+            supported for key, supported in results.items()
+            if key != _VERIFICATION_KEYS["report_date"]
         )
-        if date_was_the_only_problem:
-            parsed_without_date = dict(parsed)
-            parsed_without_date["report_date"] = None
-            return parsed_without_date
+        if measurements_all_supported:
+            # Only the date failed verification: drop it, keep the rest.
+            return {**parsed, "report_date": None}
 
     return None
 
 
-def build_narrative_prompt(processed_record):
-    """
-    Build a prompt asking Gemini to turn logic_manager's own,
-    already-decided findings into short, plain-language consultation
-    notes - phrasing only. Gemini is given the finished classifications
-    (decision, urgent_findings, flagged_trends, recent_changes, each
-    recent change already labelled "improved" or "worsened") and is
-    explicitly told never to invent its own thresholds or severity -
-    only to describe, in plain words, what Logic Manager already
-    decided.
-
-    Args:
-        processed_record: the dict logic_manager.process_ai_record()
-            returned.
-
-    Returns:
-        A prompt string ready to send to Gemini (text only, no file).
-    """
-    return (
-        "You are writing short, factual notes to help a patient "
-        "prepare for a doctor's appointment. You will be given "
-        "already-finalised health findings as JSON - every "
-        "classification (urgent, flagged, improved, worsened, stable) "
-        "has ALREADY been decided by a separate rule-based system. "
-        "Your only job is to phrase these existing findings in clear, "
-        "plain language for a patient to read.\n\n"
-        "STRICT RULES:\n"
-        "- Do not diagnose any medical condition.\n"
-        "- Do not prescribe or suggest any medication.\n"
-        "- Do not recommend starting, stopping, or changing any "
-        "medication or dosage.\n"
-        "- Do not recommend any treatment plan.\n"
-        "- Do not claim to replace a doctor or qualified healthcare "
-        "professional.\n"
-        "- Do not invent your own severity, thresholds, or "
-        "classifications - only describe the findings exactly as given.\n"
-        '- If a finding\'s "assessment" is "improved", say so clearly - '
-        'never describe an improvement as "no significant change".\n'
-        "- If a measurement is normal/stable, explain it in relation to "
-        "the patient's previous reading(s) if given, rather than only "
-        'saying "normal" or "everything is fine".\n'
-        "- Do not state or imply that a normal reading proves the "
-        "patient is healthy overall.\n"
-        "- End with a brief reminder to discuss these findings with a "
-        "qualified healthcare professional.\n\n"
-        "Findings (already classified - do not reclassify):\n"
-        f"{json.dumps(processed_record)}\n\n"
-        "Respond with ONLY valid JSON and nothing else - no markdown, "
-        "no code fences, no explanation outside the JSON - in exactly "
-        "this structure:\n"
-        "{\n"
-        '  "narrative": "<3-6 sentences of plain-language notes>"\n'
-        "}"
-    )
-
-
-def generate_consultation_narrative(processed_record, max_retries=AI_MAX_RETRIES):
+def generate_consultation_narrative(processed_record):
     """
     Ask Gemini to phrase logic_manager's already-decided findings as
     short, plain-language consultation notes. Gemini only rewords
-    existing findings here - it never classifies anything itself.
+    existing findings - it never classifies anything itself.
 
     Args:
         processed_record: the dict logic_manager.process_ai_record()
@@ -691,19 +424,16 @@ def generate_consultation_narrative(processed_record, max_retries=AI_MAX_RETRIES
         max_retries: int maximum number of attempts.
 
     Returns:
-        A plain-language narrative string on success, or None if
-        Gemini could not produce a usable result after retrying. On
-        None, the caller must fall back to logic_manager's own
-        deterministic summary rather than fabricate a successful AI
-        result.
+        A narrative string on success, or None if no usable result was
+        produced. On None, the caller must fall back to
+        logic_manager's own deterministic summary.
     """
-    prompt = build_narrative_prompt(processed_record)
+    prompt = ai_prompt.build_narrative_prompt(processed_record)
 
-    for _ in range(max_retries):
-        raw_response = call_ai_api(prompt)
-        parsed = parse_response(raw_response)
-
-        if not isinstance(parsed, dict):
+    for attempt in range(AI_MAX_RETRIES):
+        parsed = parse_response(call_ai(prompt))
+        print(f"\nAttempt: {attempt + 1}.....")
+        if parsed is None:
             continue
 
         narrative = parsed.get("narrative")

@@ -465,5 +465,138 @@
     "date": "2026-09-22",
     "report_id": "e4af057f60a349738cc60416f65a4758",
     "record_id": "056d20bd7f8948099f8d2ecdfd57907a"
+  },
+  {
+    "metrics": {
+      "heart_rate": 112,
+      "blood_pressure_systolic": 142,
+      "blood_pressure_diastolic": 92,
+      "blood_glucose": null
+    },
+    "ai_extracted_date": "2026-12-01",
+    "urgent_findings": [],
+    "flagged_trends": [],
+    "recent_changes": [],
+    "risk_score": 0,
+    "decision": "ACCEPTED",
+    "recommended_action": "No action needed - keep up with regular check-ups.",
+    "requires_doctor_review": false,
+    "summary": "All tracked metrics are stable with no notable changes recorded.",
+    "username": "tester",
+    "date": "2026-12-01",
+    "report_id": "395b11ad88a040c4ba46202da2b49558",
+    "record_id": "3395df3298674844b82af675e25ac59f"
+  },
+  {
+    "metrics": {
+      "heart_rate": 138,
+      "blood_pressure_systolic": 188,
+      "blood_pressure_diastolic": 122,
+      "blood_glucose": 15.4
+    },
+    "ai_extracted_date": "2026-09-22",
+    "urgent_findings": [
+      {
+        "metric": "Systolic Blood Pressure",
+        "status": "URGENT",
+        "reason": "Systolic Blood Pressure reading of 188 is at a level that usually warrants prompt medical attention."
+      },
+      {
+        "metric": "Diastolic Blood Pressure",
+        "status": "URGENT",
+        "reason": "Diastolic Blood Pressure reading of 122 is at a level that usually warrants prompt medical attention."
+      },
+      {
+        "metric": "Blood Glucose",
+        "status": "URGENT",
+        "reason": "Blood Glucose reading of 15.4 is at a level that usually warrants prompt medical attention."
+      },
+      {
+        "metric": "Heart Rate",
+        "status": "URGENT",
+        "reason": "Heart Rate reading of 138 is at a level that usually warrants prompt medical attention."
+      }
+    ],
+    "flagged_trends": [],
+    "recent_changes": [
+      {
+        "metric": "Systolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "classification_changed": true,
+        "previous_classification": "ELEVATED",
+        "current_classification": "SEVERE",
+        "feedback": "Your systolic blood pressure has changed from elevated (142) to severe (188) since your last record."
+      },
+      {
+        "metric": "Diastolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "classification_changed": true,
+        "previous_classification": "ELEVATED",
+        "current_classification": "SEVERE",
+        "feedback": "Your diastolic blood pressure has changed from elevated (92) to severe (122) since your last record."
+      },
+      {
+        "metric": "Heart Rate",
+        "status": "CHANGED",
+        "assessment": "worsened",
+        "classification_changed": true,
+        "previous_classification": "ELEVATED",
+        "current_classification": "SEVERE",
+        "feedback": "Your heart rate has changed from elevated (112) to severe (138) since your last record."
+      }
+    ],
+    "risk_score": 8,
+    "decision": "URGENT",
+    "recommended_action": "These readings fall outside typical safe ranges. Consider contacting a healthcare professional promptly rather than waiting for your next scheduled visit.",
+    "requires_doctor_review": true,
+    "summary": "Urgent: Systolic Blood Pressure, Diastolic Blood Pressure, Blood Glucose, Heart Rate at a level that usually warrants prompt medical attention | Please discuss these results with your doctor at your next consultation.",
+    "username": "tester",
+    "date": "2026-09-22",
+    "report_id": "e5bd4f48c6b84803b783996e750f262a",
+    "record_id": "54c00c73ee914c969f88e3d129cf1ab3"
+  },
+  {
+    "metrics": {
+      "heart_rate": 138,
+      "blood_pressure_systolic": 188,
+      "blood_pressure_diastolic": 122,
+      "blood_glucose": 15.4
+    },
+    "ai_extracted_date": "2026-09-22",
+    "urgent_findings": [
+      {
+        "metric": "Systolic Blood Pressure",
+        "status": "URGENT",
+        "reason": "Systolic Blood Pressure reading of 188 is at a level that usually warrants prompt medical attention."
+      },
+      {
+        "metric": "Diastolic Blood Pressure",
+        "status": "URGENT",
+        "reason": "Diastolic Blood Pressure reading of 122 is at a level that usually warrants prompt medical attention."
+      },
+      {
+        "metric": "Blood Glucose",
+        "status": "URGENT",
+        "reason": "Blood Glucose reading of 15.4 is at a level that usually warrants prompt medical attention."
+      },
+      {
+        "metric": "Heart Rate",
+        "status": "URGENT",
+        "reason": "Heart Rate reading of 138 is at a level that usually warrants prompt medical attention."
+      }
+    ],
+    "flagged_trends": [],
+    "recent_changes": [],
+    "risk_score": 8,
+    "decision": "URGENT",
+    "recommended_action": "These readings fall outside typical safe ranges. Consider contacting a healthcare professional promptly rather than waiting for your next scheduled visit.",
+    "requires_doctor_review": true,
+    "summary": "Urgent: Systolic Blood Pressure, Diastolic Blood Pressure, Blood Glucose, Heart Rate at a level that usually warrants prompt medical attention | Please discuss these results with your doctor at your next consultation.",
+    "username": "tester",
+    "date": "2026-09-22",
+    "report_id": "e5bd4f48c6b84803b783996e750f262a",
+    "record_id": "c3b21b29bac34d8c97d92918d76f7050"
   }
 ]
