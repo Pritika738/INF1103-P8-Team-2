@@ -823,3 +823,37 @@ def validate_medical_profile(profile):
 def enforce_safety_guardrails(ai_explanation):
     """Backwards-compatible shim -> SafetyGuardrail.enforce()."""
     return _default_guardrail.enforce(ai_explanation)
+
+# ==========================================
+# DEMO (local execution only)
+# ==========================================
+if __name__ == "__main__":
+    import json
+
+    mock_ai_extracted = {
+        "heart_rate": 138,
+        "blood_pressure": {"systolic": 188, "diastolic": 122},
+        "blood_glucose": 15.4,
+        "report_date": "2026-09-22",
+    }
+    mock_history = [
+        {
+            "date": "2026-07-01",
+            "blood_pressure_systolic": 132,
+            "blood_pressure_diastolic": 85,
+            "blood_glucose": 6.6,
+            "heart_rate": 104,
+        },
+        {
+            "date": "2026-08-01",
+            "blood_pressure_systolic": 148,
+            "blood_pressure_diastolic": 96,
+            "blood_glucose": 9.2,
+            "heart_rate": 118,
+        },
+    ]
+
+    engine = LogicManager.default()
+    print("--- Simulating an urgent + persistent-trend reading (OOP) ---")
+    result = engine.process(mock_ai_extracted, mock_history)
+    print(json.dumps(result, indent=4))
