@@ -470,3 +470,37 @@ class MedicalProfileValidator:
             cleaned["blood_group"] = blood_group
         else:
             errors.append(f"'{blood_group}' is not a recognised blood group.")
+
+MedicalProfileValidator.validate) -----
+
+        # --- Medications: name required if row isn't fully blank; dosage, ---
+        # --- if given, must be a non-negative number. ---
+        for index, med in enumerate(profile.get("medications", []), start=1):
+            name = str(med.get("name", "")).strip()
+            amount_raw = str(med.get("dosage_amount", "")).strip()
+            if not name and not amount_raw:
+                continue  # fully blank row - skip silently
+            if not name:
+                errors.append(f"Medication {index}: a name is required.")
+                continue
+            amount = None
+            if amount_raw:
+                try:
+                    amount = float(amount_raw)
+                except ValueError:
+                    errors.append(f"Medication '{name}': dosage must be a number.")
+                    continue
+                if amount < 0:
+                    errors.append(f"Medication '{name}': dosage cannot be negative.")
+                    continue
+            unit = str(med.get("dosage_unit", "")).strip()
+            if unit and unit not in self.VALID_DOSAGE_UNITS:
+                errors.append(f"Medication '{name}': '{unit}' is not a recognised dosage unit.")
+                unit = ""
+            cleaned["medications"].append({
+                "name": name,
+                "dosage_amount": amount,
+                "dosage_unit": unit,
+                "frequency": str(med.get("frequency", "")).strip(),
+            })
+
