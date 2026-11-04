@@ -471,7 +471,7 @@ class MedicalProfileValidator:
         else:
             errors.append(f"'{blood_group}' is not a recognised blood group.")
 
-MedicalProfileValidator.validate) -----
+
 
         # --- Medications: name required if row isn't fully blank; dosage, ---
         # --- if given, must be a non-negative number. ---
