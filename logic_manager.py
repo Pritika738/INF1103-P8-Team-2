@@ -331,4 +331,58 @@ class PersistentTrendRule(Rule):
             )
         return None
 
+class RecentChangeRule(Rule):
+    """
+    Compare the current reading against only the single most recent past
+    reading. Deltas within this metric's tolerance are normal
+    fluctuation and ignored - UNLESS the reading crossed a classification
+    boundary (e.g. severe to normal), which is always notable even if
+    numerically small.
+    """
 
+    def evaluate(self, current_value, history_values):
+        if current_value is None or not history_values:
+            return None
+
+        past_val = history_values[-1]
+        if past_val is None:
+            return None	
+
+        delta = current_value - past_val
+        past_class = self._spec.classify(past_val)
+        current_class = self._spec.classify(current_value)
+        classification_changed = past_class != current_class
+
+        if abs(delta) <= self._spec.tolerance and not classification_changed:
+            return None  # within normal day-to-day fluctuation
+
+        label = self._spec.label
+        direction = "increased" if delta > 0 else "decreased"
+        improved = self._spec.is_improvement(delta)
+        assessment = "improved" if improved else "worsened"
+
+        if classification_changed:
+            feedback = (
+                f"Your {label.lower()} has changed from "
+                f"{past_class.value.lower()} ({past_val}) to "
+                f"{current_class.value.lower()} ({current_value}) "
+                "since your last record."
+            )
+        else:
+            moved = "closer to" if improved else "further from"
+            feedback = (
+                f"Your {label.lower()} has {direction} from {past_val} "
+                f"to {current_value} since your last record "
+                f"({assessment} - moved {moved} the typical reference "
+                "range)."
+            )
+
+        return Finding(
+            metric=label,
+            status="CHANGED",
+            assessment=assessment,
+            classification_changed=classification_changed,
+            previous_classification=(past_class.value if past_class else None),
+            current_classification=(current_class.value if current_class else None),
+            feedback=feedback,
+        )
