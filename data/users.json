@@ -30,5 +30,11 @@
         "email": "test4@gmail.com",
         "salt": "ed28fdd2904ff1710fe64ea101cde473",
         "password_hash": "d2964a2cdfde421911eb34726d10e0e63d063b49f770783c8132296086199504"
+    },
+    "test81": {
+        "username": "test81",
+        "email": "test81@test.com",
+        "salt": "23662a08b14590164344aae1f9eb33b6",
+        "password_hash": "06af7b86065e517ca56804c2c8eb7dc14c24f496a3e875e200d36e95082ad960"
     }
 }
