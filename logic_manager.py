@@ -504,3 +504,45 @@ class MedicalProfileValidator:
                 "frequency": str(med.get("frequency", "")).strip(),
             })
 
+            # --- Allergies: allergen required; severity, if given, must be known ---
+        for index, allergy in enumerate(profile.get("allergies", []), start=1):
+            allergen = str(allergy.get("allergen", "")).strip()
+            if not allergen:
+                continue
+            severity = str(allergy.get("severity", "")).strip().lower()
+            if severity and severity not in self.VALID_ALLERGY_SEVERITIES:
+                errors.append(
+                    f"Allergy '{allergen}': severity must be mild, moderate or severe."
+                )
+                severity = ""
+            cleaned["allergies"].append({
+                "allergen": allergen,
+                "reaction": str(allergy.get("reaction", "")).strip(),
+                "severity": severity,
+            })
+
+        # --- Emergency contacts: name and a plausible phone number required ---
+        for index, contact in enumerate(profile.get("emergency_contacts", []), start=1):
+            name = str(contact.get("name", "")).strip()
+            phone = str(contact.get("phone", "")).strip()
+            if not name and not phone:
+                continue
+            if not name:
+                errors.append(f"Emergency contact {index}: a name is required.")
+                continue
+            if not phone:
+                errors.append(f"Emergency contact '{name}': a phone number is required.")
+                continue
+            if not self._PHONE_RE.fullmatch(phone):
+                errors.append(
+                    f"Emergency contact '{name}': phone number must include the "
+                    "country code, e.g. +65 1234 5678."
+                )
+                continue
+            cleaned["emergency_contacts"].append({
+                "name": name,
+                "relationship": str(contact.get("relationship", "")).strip(),
+                "phone": phone,
+                "email": str(contact.get("email", "")).strip(),
+            })
+
