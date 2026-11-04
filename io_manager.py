@@ -12,7 +12,6 @@ construction, no direct Gemini calls, and no JSON parsing/validation
 itself - all of that stays in ai_manager.py.
 """
 
-import ai_manager, ai_prompt
 from config import SUPPORTED_METRICS
 
 # MIME types this application currently accepts for medical report
@@ -105,45 +104,6 @@ def is_supported_upload_type(mime_type):
         True if the type is supported, False otherwise.
     """
     return mime_type in SUPPORTED_UPLOAD_MIME_TYPES
-
-
-def process_uploaded_report(file_bytes, mime_type):
-    """
-    Run an uploaded medical report through the AI Manager pipeline.
-
-    Builds the extraction prompt and sends the file to Gemini via
-    ai_manager, retrying and validating internally, and returns
-    whatever ai_manager decides is trustworthy (or not).
-
-    Args:
-        file_bytes: bytes - the raw content of the uploaded file.
-        mime_type: str - the file's MIME type, e.g. "application/pdf".
-
-    Returns:
-        A validated response dict (see ai_manager.validate_schema())
-        on success, or None if ai_manager could not produce a
-        trustworthy result after retrying.
-    """
-    prompt = ai_prompt.build_prompt()
-    return ai_manager.call_ai_with_retry(file_bytes, mime_type, prompt)
-
-
-def generate_consultation_summary(processed_record):
-    """
-    Get a plain-language consultation summary for an already-processed
-    record, via the AI Manager.
-
-    Args:
-        processed_record: dict - the output of
-            logic_manager.process_ai_record().
-
-    Returns:
-        A narrative string from ai_manager.generate_consultation_narrative(),
-        or None if the AI Manager could not produce one - the caller
-        must fall back to a non-AI summary in that case rather than
-        treat None as success.
-    """
-    return ai_manager.generate_consultation_narrative(processed_record)
 
 
 # --- Reusable input-validation helpers -------------------------------------

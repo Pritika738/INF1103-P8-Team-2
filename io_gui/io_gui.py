@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 import json
 import os
 import re
@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import io_manager
 import logic_manager
 import data_manager
+import ai_manager, ai_prompt
 
 st.set_page_config(
     page_title="PASSAY - Health History and Consultation Prep",
@@ -1971,8 +1972,9 @@ def show_upload():
                     first_page = validated_pages[0]
 
                     with st.spinner("Sending report to the AI Manager..."):
-                        ai_extracted = io_manager.process_uploaded_report(
-                            first_page["bytes"], first_page["mime_type"]
+                        prompt = ai_prompt.build_prompt()
+                        ai_extracted = ai_manager.call_ai_with_retry(
+                            first_page["bytes"], first_page["mime_type"], prompt
                         )
 
                         all_records = data_manager.load_health_records()
@@ -2182,10 +2184,12 @@ def show_history():
                         original_bytes = data_manager.get_original_report_bytes(
                             original_entry["stored_filename"]
                         )
+                        prompt = ai_prompt.build_prompt()
                         ai_extracted = (
-                            io_manager.process_uploaded_report(
+                            ai_manager.call_ai_with_retry(
                                 original_bytes,
                                 original_entry.get("mime_type", "application/pdf"),
+                                prompt,
                             )
                             if original_bytes
                             else None
@@ -2475,7 +2479,7 @@ def show_consultation():
     ai_narrative = None
     if latest_processed_record:
         with st.spinner("Preparing your consultation summary..."):
-            ai_narrative = io_manager.generate_consultation_summary(latest_processed_record)
+            ai_narrative = ai_manager.generate_consultation_narrative(latest_processed_record)
 
     report = build_report(who, trends, ai_narrative)
 

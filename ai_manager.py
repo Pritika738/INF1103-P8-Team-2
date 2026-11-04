@@ -67,7 +67,7 @@ _VERIFICATION_KEYS = {
 
 # ---------------------------------------------------------------------------
 # Talking to Gemini
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------z
 
 def _error_json(message):
     """Return a JSON string of the form {"error": message}."""
@@ -147,68 +147,6 @@ def call_ai(prompt, file_bytes=None, mime_type=None):
     return _error_json(
         "The AI service is currently unavailable. Please try again later."
     )
-
-
-def extract_fields(uploaded_file, prompt, schema):
-    """
-    Upload a file to Gemini's Files API and extract structured data
-    from it directly into `schema`, retrying on a transient "model
-    busy" (503) response.
-
-    This is an alternative extraction path to build_prompt() +
-    call_ai_with_retry(): it uses Gemini's native structured-output
-    feature (response_schema) so Gemini itself enforces the shape. It
-    is not part of the active upload pipeline (see
-    io_manager.process_uploaded_report(), which uses
-    call_ai_with_retry()).
-
-    Args:
-        uploaded_file: a file-like object with a `.type` attribute
-            (e.g. a Streamlit UploadedFile) to send to Gemini.
-        prompt: str - instructions describing what to extract.
-        schema: a Pydantic model class describing the desired output.
-
-    Returns:
-        A dict parsed from Gemini's structured JSON response on
-        success, or None on failure (never raises).
-    """
-    client = genai.Client(api_key=get_api_key())
-
-    gemini_file = client.files.upload(
-        file=uploaded_file,
-        config=types.UploadFileConfig(mime_type=uploaded_file.type),
-    )
-
-    try:
-        for model_name in _MODEL_CHAIN:
-            for attempt in range(AI_MAX_RETRIES):
-                print(f"\nExtracting with {model_name} \nAttempt: {attempt + 1}.....")
-                try:
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=[uploaded_file, prompt],
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            response_schema=schema,
-                            temperature=0.1,
-                        ),
-                    )
-                    print("Extraction Complete!")
-                    return parse_response(response.text)
-                except genai_errors.APIError as exc:
-                    if not _is_model_unavailable(exc):
-                        return None  # e.g. auth/bad request: no model will help
-                    if attempt < AI_MAX_RETRIES:
-                        time.sleep(BASE_DELAY)  # retry same model first
-                        continue
-                    break  # retries exhausted: move on to the next model
-                except Exception:
-                    return None
-    finally:
-        # Always clean up the uploaded file on Gemini's servers.
-        client.files.delete(name=gemini_file.name)
-
-    return None
 
 
 # ---------------------------------------------------------------------------
