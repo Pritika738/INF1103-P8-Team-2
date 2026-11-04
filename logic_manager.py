@@ -201,3 +201,31 @@ class BloodGlucose(MetricSpec):
             key="blood_glucose", label="Blood Glucose", unit="mmol/L",
             urgent_at=13.9, flag_above=7.0, tolerance=0.5,
         )
+
+# ===========================================================================
+# Value object produced by the rules / engine
+# ===========================================================================
+
+class Finding:
+    """
+    One rule's conclusion about one metric. Replaces the loose
+    {"metric", "status", "reason", ...} dicts the old functions built.
+    JSON-serialisable via to_dict() so stored records match the
+    procedural pipeline's output shape exactly.
+    """
+
+    def __init__(self, metric: str, status: str, **extra: Any):
+        self._metric = metric
+        self._status = status
+        self._extra = extra
+
+    @property
+    def status(self) -> str:
+        return self._status
+
+    @property
+    def metric(self) -> str:
+        return self._metric
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"metric": self._metric, "status": self._status, **self._extra}
