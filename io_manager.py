@@ -1,143 +1,112 @@
 """
 io_manager.py
 
-All user-facing input() and print() operations live in this module.
-Other modules should never call input()/print() directly - they should
-return data/results, and io_manager displays/collects it.
+The IO Manager: all terminal-facing display and input collection goes
+through this class. No other module may call input()/print() directly -
+they return data/results and IOManager displays/collects it.
 
-process_uploaded_report() is the one exception to "no other modules" -
-it is the I/O-layer function that a GUI/CLI screen calls to hand an
-uploaded medical report to ai_manager.py. It contains no AI prompt
-construction, no direct Gemini calls, and no JSON parsing/validation
-itself - all of that stays in ai_manager.py.
+Object relationships (see UML):
+- IOManager --> UserInterface      association: IOManager uses an
+                                   injected interface; the interface has
+                                   no idea IOManager exists and can be
+                                   reused by anything else.
+- IOManager *-- RecordFormatter, InputValidator, MimeTypeValidator, Menu
+                                   composition: created and owned by
+                                   IOManager; they have no purpose outside it.
+
+Business rules, AI calls and persistence are explicitly out of scope
+here - see ai_manager.py, logic_manager.py and data_manager.py.
 """
 
-from config import SUPPORTED_METRICS
+from typing import Any, Optional, Sequence
+
+from io_layer import (
+    ChoiceValidator, ConsoleInterface, DateValidator, InputValidator, Menu,
+    MimeTypeValidator, NonEmptyValidator, NumberValidator, TextRecordFormatter,
+    UserInterface, ValidationError, YesNoValidator,
+)
+
+__all__ = ["IOManager", "UserInterface", "ConsoleInterface", "InputValidator",
+           "SUPPORTED_UPLOAD_MIME_TYPES"]
 
 # MIME types this application currently accepts for medical report
 # uploads (see GUI_PLAN.md: "Supported Upload Formats").
 SUPPORTED_UPLOAD_MIME_TYPES = {"application/pdf", "image/png", "image/jpeg"}
 
 
-# --- Menu display --------------------------------------------------------
+class IOManager:
+    """Collects and validates user input; displays records, lists and results."""
 
-def show_main_menu():
-    """Print the main CLI menu options."""
-    print("\n===== Health History & Consultation Prep =====")
-    print("1. Add Health Record")
-    print("2. View Health History")
-    print("3. Analyse Health Records")
-    print("4. Generate Consultation Report")
-    print("5. Exit")
+    def __init__(self, interface: UserInterface, formatter=None):
+        self._interface = interface                                  # association
+        self._formatter = formatter or TextRecordFormatter()         # composition
+        self._mime_validator = MimeTypeValidator(SUPPORTED_UPLOAD_MIME_TYPES)
+        self._menu = Menu.main_menu()
 
+    # ------------------------------------------------------------------
+    # Generic prompt/display
+    # ------------------------------------------------------------------
 
-def get_menu_choice():
-    """
-    Prompt the user for a menu choice and return it as a string.
-    Does not validate the value - callers decide how to handle it.
-    """
-    return input("Select an option (1-5): ").strip()
+    def ask(self, prompt: str, validator) -> Any:
+        """Prompt with `prompt` until `validator` accepts the answer."""
+        while True:
+            try:
+                return validator.validate(self._interface.read(prompt))
+            except ValidationError as exc:
+                self._interface.write(str(exc))
 
+    def show(self, message: str = "") -> None:
+        self._interface.write(message)
 
-def show_message(message):
-    """Print a generic message to the user."""
-    print(message)
+    def show_placeholder(self, feature_name: str) -> None:
+        self._interface.write(f"[{feature_name}] This feature is not implemented yet.")
 
+    # ------------------------------------------------------------------
+    # Menu
+    # ------------------------------------------------------------------
 
-def show_placeholder(feature_name):
-    """Print a standard 'not implemented yet' message for a feature."""
-    print(f"[{feature_name}] This feature is not implemented yet.")
+    def show_main_menu(self) -> None:
+        self._interface.write(self._menu.render())
 
+    def get_menu_choice(self) -> str:
+        """Return the user's menu choice, re-prompting until it is valid."""
+        return self.ask("Select an option (1-5): ", ChoiceValidator(self._menu.keys))
 
-# --- Input collection ------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Health record input / display
+    # ------------------------------------------------------------------
 
-def prompt_new_health_record():
-    """
-    Prompt the user for the fields of a new health record and return
-    them as a dictionary. Uses the basic validation helpers below.
+    def prompt_new_health_record(self) -> dict:
+        """Collect a new health record's fields from the user."""
+        self._interface.write("\n-- Add Health Record --")
+        record = {"date": self.ask("Record date (YYYY-MM-DD): ", DateValidator())}
+        for metric, label, unit in (
+            ("blood_pressure_systolic", "Systolic blood pressure", "mmHg"),
+            ("blood_pressure_diastolic", "Diastolic blood pressure", "mmHg"),
+            ("heart_rate", "Heart rate", "bpm"),
+            ("blood_glucose", "Blood glucose", "mmol/L"),
+            ("cholesterol", "Cholesterol", "mmol/L"),
+        ):
+            record[metric] = self.ask(f"{label} ({unit}): ", NumberValidator())
+        record["medication_name"] = self.ask("Medication name (optional): ", NonEmptyValidator(required=False, blank_value=""))
+        record["medication_dosage"] = self.ask("Medication dosage (optional): ", NonEmptyValidator(required=False, blank_value=""))
+        record["allergies"] = self.ask("Allergy information (optional): ", NonEmptyValidator(required=False, blank_value=""))
+        return record
 
-    Returns:
-        dict with the collected health record fields.
-    """
-    print("\n-- Add Health Record --")
-    record = {
-        "date": input("Record date (YYYY-MM-DD): ").strip(),
-        "blood_pressure_systolic": get_valid_number("Systolic blood pressure (mmHg): "),
-        "blood_pressure_diastolic": get_valid_number("Diastolic blood pressure (mmHg): "),
-        "heart_rate": get_valid_number("Heart rate (bpm): "),
-        "blood_glucose": get_valid_number("Blood glucose (mmol/L): "),
-        "cholesterol": get_valid_number("Cholesterol (mmol/L): "),
-        "medication_name": input("Medication name (optional): ").strip(),
-        "medication_dosage": input("Medication dosage (optional): ").strip(),
-        "allergies": input("Allergy information (optional): ").strip(),
-    }
-    return record
+    def show_health_records(self, records: Sequence[dict]) -> None:
+        """Display a list of health records using the configured formatter."""
+        self._interface.write(self._formatter.format(records))
 
+    def confirm_action(self, prompt_text: str) -> bool:
+        return self.ask(f"{prompt_text} (y/n): ", YesNoValidator())
 
-def show_health_records(records):
-    """Print a list of health records in a simple readable format."""
-    if not records:
-        print("No health records found.")
-        return
+    def get_non_empty_string(self, prompt_text: str) -> str:
+        return self.ask(prompt_text, NonEmptyValidator())
 
-    print(f"\n-- Health History ({len(records)} record(s)) --")
-    for index, record in enumerate(records, start=1):
-        print(f"\nRecord {index}:")
-        for metric in SUPPORTED_METRICS:
-            if metric in record:
-                print(f"  {metric}: {record[metric]}")
-        if record.get("date"):
-            print(f"  date: {record['date']}")
+    # ------------------------------------------------------------------
+    # Medical report upload handling
+    # ------------------------------------------------------------------
 
-
-# --- Medical report upload handling -----------------------------------
-
-def is_supported_upload_type(mime_type):
-    """
-    Check whether `mime_type` is one of the medical report formats this
-    application accepts (PDF, PNG, JPG/JPEG).
-
-    Args:
-        mime_type: str - a file's MIME type, e.g. "application/pdf".
-
-    Returns:
-        True if the type is supported, False otherwise.
-    """
-    return mime_type in SUPPORTED_UPLOAD_MIME_TYPES
-
-
-# --- Reusable input-validation helpers -------------------------------------
-
-def get_valid_number(prompt_text):
-    """
-    Repeatedly prompt the user until a valid number (int or float) is
-    entered, or the user leaves the field blank (returns None).
-    """
-    while True:
-        raw_value = input(prompt_text).strip()
-        if raw_value == "":
-            return None
-        try:
-            return float(raw_value)
-        except ValueError:
-            print("Please enter a valid number, or leave blank to skip.")
-
-
-def get_non_empty_string(prompt_text):
-    """Repeatedly prompt the user until a non-empty string is entered."""
-    while True:
-        value = input(prompt_text).strip()
-        if value:
-            return value
-        print("This field cannot be empty.")
-
-
-def confirm_action(prompt_text):
-    """Ask the user a yes/no question and return True/False."""
-    while True:
-        answer = input(f"{prompt_text} (y/n): ").strip().lower()
-        if answer in ("y", "yes"):
-            return True
-        if answer in ("n", "no"):
-            return False
-        print("Please answer 'y' or 'n'.")
+    def is_supported_upload_type(self, mime_type: Optional[str]) -> bool:
+        """True if `mime_type` is an accepted medical report format."""
+        return self._mime_validator.is_supported(mime_type or "")
