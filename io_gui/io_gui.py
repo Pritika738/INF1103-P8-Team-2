@@ -1004,10 +1004,6 @@ USERNAME_PATTERN = re.compile(
     r"^[A-Za-z0-9_.-]{3,30}$"
 )
 
-EMAIL_PATTERN = re.compile(
-    r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
-)
-
 PASSWORD_ITERATIONS = 200_000
 
 ALLOWED_FILE_EXTENSIONS = {
@@ -1044,19 +1040,6 @@ def validate_username(username: str) -> str:
             "Username must be 3–30 characters and may only "
             "contain letters, numbers, '.', '_' or '-'."
         )
-
-    return ""
-
-
-def validate_email(email: str) -> str:
-
-    email = email.strip()
-
-    if not email:
-        return "Please enter an email address."
-
-    if not EMAIL_PATTERN.fullmatch(email):
-        return "Please enter a valid email address."
 
     return ""
 
@@ -1157,7 +1140,6 @@ def save_accounts(accounts: dict) -> None:
 
 def create_temporary_account(
     username: str,
-    email: str,
     password: str
 ) -> tuple[bool, str]:
     """
@@ -1169,7 +1151,6 @@ def create_temporary_account(
     """
 
     username = username.strip()
-    email = email.strip().lower()
 
     username_key = username.lower()
 
@@ -1183,27 +1164,12 @@ def create_temporary_account(
             "That username is already taken."
         )
 
-    # Check duplicate email
-    for account in accounts.values():
-
-        if account.get(
-            "email",
-            ""
-        ).lower() == email:
-
-            return (
-                False,
-                "An account already exists "
-                "with this email address."
-            )
-
     # Create random salt for password hashing
     salt = secrets.token_hex(16)
 
     # Store HASH, not actual password
     accounts[username_key] = {
         "username": username,
-        "email": email,
         "salt": salt,
         "password_hash": hash_password(
             password,
@@ -1514,10 +1480,6 @@ def show_login():
                         "username"
                     ]
 
-                    st.session_state.email = account[
-                        "email"
-                    ]
-
                     go("dashboard")
 
             st.caption(
@@ -1589,7 +1551,6 @@ def show_login():
                         account = accounts[pin_username.strip().lower()]
 
                         st.session_state.username = account["username"]
-                        st.session_state.email = account["email"]
                         st.session_state.pop("pin_attempts", None)
 
                         go("dashboard")
@@ -1640,12 +1601,6 @@ def show_register():
                 key="register_username"
             )
 
-            email = st.text_input(
-                "Email",
-                placeholder="name@example.com",
-                key="register_email"
-            )
-
             password = st.text_input(
                 "Password",
                 type="password",
@@ -1675,11 +1630,6 @@ def show_register():
                     username
                 )
 
-                # Check email
-                email_error = validate_email(
-                    email
-                )
-
                 # Check password strength
                 password_error = validate_password(
                     password
@@ -1689,12 +1639,6 @@ def show_register():
 
                     st.error(
                         username_error
-                    )
-
-                elif email_error:
-
-                    st.error(
-                        email_error
                     )
 
                 elif password_error:
@@ -1714,7 +1658,6 @@ def show_register():
                     created, message = (
                         create_temporary_account(
                             username,
-                            email,
                             password
                         )
                     )
