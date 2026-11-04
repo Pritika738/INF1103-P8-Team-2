@@ -76,3 +76,31 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
+
+# ===========================================================================
+# Enumerations - small, self-describing value types
+# ===========================================================================
+
+class Tier(Enum):
+    """
+    Severity tier for a single reading, independent of trend history.
+    Mirrors the old _metric_classification() return values ("SEVERE",
+    "ELEVATED", "NORMAL") but as a proper type instead of bare strings.
+    """
+    NORMAL = "NORMAL"
+    ELEVATED = "ELEVATED"
+    SEVERE = "SEVERE"
+
+
+class Decision(Enum):
+    """
+    Final routing outcome for a processed record. Same five string
+    values the procedural version produced, so stored/serialised records
+    look identical to the old pipeline's output.
+    """
+    NOT_MEDICAL_REPORT = "NOT_MEDICAL_REPORT"
+    REJECTED = "REJECTED"
+    URGENT = "URGENT"
+    FLAGGED = "FLAGGED"
+    ACCEPTED = "ACCEPTED"
+
