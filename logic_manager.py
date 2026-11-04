@@ -601,3 +601,48 @@ class LogicManager:
             rules.append(PersistentTrendRule(spec))
             rules.append(RecentChangeRule(spec))
         return cls(rules)
+# ----- shape helpers (same behaviour as the old module functions) -----
+    @staticmethod
+    def _flatten_ai_metrics(ai_extracted: Optional[Dict[str, Any]]) -> Dict[str, Optional[float]]:
+        """Nested AI shape -> flat metric keys. Mirrors flatten_ai_metrics()."""
+        keys = ["blood_pressure_systolic", "blood_pressure_diastolic",
+                "blood_glucose", "heart_rate"]
+        if not isinstance(ai_extracted, dict):
+            return {k: None for k in keys}
+        bp = ai_extracted.get("blood_pressure") or {}
+        return {
+            "heart_rate": ai_extracted.get("heart_rate"),
+            "blood_pressure_systolic": bp.get("systolic"),
+            "blood_pressure_diastolic": bp.get("diastolic"),
+            "blood_glucose": ai_extracted.get("blood_glucose"),
+        }
+
+    @staticmethod
+    def _extract_report_date(ai_extracted: Optional[Dict[str, Any]]) -> Optional[str]:
+        """Mirrors _extract_report_date(): validated 'YYYY-MM-DD' or None."""
+        if not isinstance(ai_extracted, dict):
+            return None
+        report_date = ai_extracted.get("report_date")
+        if not isinstance(report_date, str):
+            return None
+        try:
+            datetime.strptime(report_date, "%Y-%m-%d")
+        except ValueError:
+            return None
+        return report_date
+
+    @staticmethod
+    def _history_values(historical_records: List[Dict[str, Any]], metric: str) -> List[Optional[float]]:
+        """
+        This metric's past readings, oldest to newest, reading from
+        either a flat CLI record or an AI-pipeline record nested under
+        'metrics' - mirrors the old _get_metric_value() per record.
+        """
+        values: List[Optional[float]] = []
+        for record in historical_records:
+            if isinstance(record.get("metrics"), dict):
+                values.append(record["metrics"].get(metric))
+            else:
+                values.append(record.get(metric))
+        return values
+
