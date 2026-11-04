@@ -1100,5 +1100,133 @@
     "date": "2026-10-11",
     "report_id": "e16b56fe538444adbee6c1d530a33b2f",
     "record_id": "36f6dca5851f44ddbb5d93f3addf2e3e"
+  },
+  {
+    "metrics": {
+      "heart_rate": 119,
+      "blood_pressure_systolic": 135,
+      "blood_pressure_diastolic": 91,
+      "blood_glucose": 6.2
+    },
+    "ai_extracted_date": "2026-10-11",
+    "urgent_findings": [],
+    "flagged_trends": [],
+    "recent_changes": [],
+    "risk_score": 0,
+    "decision": "ACCEPTED",
+    "recommended_action": "No action needed - keep up with regular check-ups.",
+    "requires_doctor_review": false,
+    "summary": "All tracked metrics are stable with no notable changes recorded.",
+    "username": "test81",
+    "date": "2026-10-11",
+    "report_id": "404d0e4199504ff0b191adcfa3caf402",
+    "record_id": "2f6e1d552bb341af9d7792b3c126d82c"
+  },
+  {
+    "metrics": {
+      "heart_rate": 113,
+      "blood_pressure_systolic": 128,
+      "blood_pressure_diastolic": 86,
+      "blood_glucose": 4.2
+    },
+    "ai_extracted_date": "2019-11-06",
+    "urgent_findings": [],
+    "flagged_trends": [],
+    "recent_changes": [
+      {
+        "metric": "Systolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "classification_changed": true,
+        "previous_classification": "ELEVATED",
+        "current_classification": "NORMAL",
+        "feedback": "Your systolic blood pressure has changed from elevated (135) to normal (128) since your last record."
+      },
+      {
+        "metric": "Diastolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "classification_changed": false,
+        "previous_classification": "ELEVATED",
+        "current_classification": "ELEVATED",
+        "feedback": "Your diastolic blood pressure has decreased from 91 to 86 since your last record (improved - moved closer to the typical reference range)."
+      },
+      {
+        "metric": "Blood Glucose",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "classification_changed": false,
+        "previous_classification": "NORMAL",
+        "current_classification": "NORMAL",
+        "feedback": "Your blood glucose has decreased from 6.2 to 4.2 since your last record (improved - moved closer to the typical reference range)."
+      },
+      {
+        "metric": "Heart Rate",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "classification_changed": false,
+        "previous_classification": "ELEVATED",
+        "current_classification": "ELEVATED",
+        "feedback": "Your heart rate has decreased from 119 to 113 since your last record (improved - moved closer to the typical reference range)."
+      }
+    ],
+    "risk_score": 0,
+    "decision": "ACCEPTED",
+    "recommended_action": "No action needed - keep up with regular check-ups.",
+    "requires_doctor_review": false,
+    "summary": "Decreased since last visit: Diastolic Blood Pressure, Blood Glucose, Heart Rate | Please discuss these results with your doctor at your next consultation.",
+    "username": "test81",
+    "date": "2019-11-06",
+    "report_id": "e1a33f0984a243b3a3ad691703ad15b5",
+    "record_id": "5236e40deaac4539b643d10a3cac5e88"
+  },
+  {
+    "metrics": {
+      "heart_rate": 84,
+      "blood_pressure_systolic": 119,
+      "blood_pressure_diastolic": 77,
+      "blood_glucose": 4.2
+    },
+    "ai_extracted_date": "2008-03-07",
+    "urgent_findings": [],
+    "flagged_trends": [],
+    "recent_changes": [
+      {
+        "metric": "Systolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "classification_changed": false,
+        "previous_classification": "NORMAL",
+        "current_classification": "NORMAL",
+        "feedback": "Your systolic blood pressure has decreased from 128 to 119 since your last record (improved - moved closer to the typical reference range)."
+      },
+      {
+        "metric": "Diastolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "classification_changed": true,
+        "previous_classification": "ELEVATED",
+        "current_classification": "NORMAL",
+        "feedback": "Your diastolic blood pressure has changed from elevated (86) to normal (77) since your last record."
+      },
+      {
+        "metric": "Heart Rate",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "classification_changed": true,
+        "previous_classification": "ELEVATED",
+        "current_classification": "NORMAL",
+        "feedback": "Your heart rate has changed from elevated (113) to normal (84) since your last record."
+      }
+    ],
+    "risk_score": 0,
+    "decision": "ACCEPTED",
+    "recommended_action": "No action needed - keep up with regular check-ups.",
+    "requires_doctor_review": false,
+    "summary": "Decreased since last visit: Systolic Blood Pressure | Please discuss these results with your doctor at your next consultation.",
+    "username": "test81",
+    "date": "2008-03-07",
+    "report_id": "e0146461259345bcbf4c3e14f63f6928",
+    "record_id": "a6d71effe24f4b5e8be5bbd1ecf38faa"
   }
 ]
