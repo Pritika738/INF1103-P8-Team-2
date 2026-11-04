@@ -262,4 +262,23 @@ class Rule(ABC):
         """
         raise NotImplementedError
 
+class UrgentThresholdRule(Rule):
+    """
+    Tier 1: a single CURRENT reading at/above the urgent threshold is
+    flagged immediately, regardless of trend history. Not multi-
+    conditional by design - one dangerously high reading shouldn't wait
+    for a pattern to emerge across visits.
+    """
+
+    def evaluate(self, current_value, history_values):
+        if not self._spec.is_urgent(current_value):
+            return None
+        return Finding(
+            metric=self._spec.label,
+            status="URGENT",
+            reason=(
+                f"{self._spec.label} reading of {current_value} is at a "
+                "level that usually warrants prompt medical attention."
+            ),
+        )
 
