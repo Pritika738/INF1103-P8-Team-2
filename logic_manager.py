@@ -281,4 +281,46 @@ class UrgentThresholdRule(Rule):
                 "level that usually warrants prompt medical attention."
             ),
         )
+class PersistentTrendRule(Rule):
+    """
+    Tier 2 from the old evaluate_health_metrics() - the MULTI-CONDITION
+    rule the brief specifically requires preserved. It fires only when
+    BOTH conditions hold:
+      (a) the current reading exceeds the lower flag threshold, AND
+      (b) the reading has been strictly increasing across the last three
+          consecutive readings (today > previous visit > the one before).
+    Either condition alone is not enough.
+    """
+
+    def __init__(self, spec: MetricSpec, visits: int = 3):
+        super().__init__(spec)
+        self._visits = visits  # kept for clarity/extensibility
+
+    def evaluate(self, current_value, history_values):
+        # Condition (a): above the flag floor, and an urgent reading was
+        # already handled by UrgentThresholdRule, so skip those here.
+        if current_value is None:
+            return None
+        if current_value <= self._spec.flag_above:
+            return None
+        if self._spec.is_urgent(current_value):
+            return None
+        if len(history_values) < 2:
+            return None
+
+        past_1 = history_values[-1]
+        past_2 = history_values[-2]
+
+        # Condition (b): strictly rising across three consecutive readings.
+        if (past_1 is not None and past_2 is not None
+                and current_value > past_1 > past_2):
+            return Finding(
+                metric=self._spec.label,
+                status="FLAGGED",
+                reason=(
+                    f"{self._spec.label} ({current_value}) is elevated and "
+                    "has been rising for three consecutive readings."
+                ),
+            )
+        return None
 
