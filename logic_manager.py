@@ -546,3 +546,13 @@ class MedicalProfileValidator:
                 "email": str(contact.get("email", "")).strip(),
             })
 
+        # --- Hereditary illness: force the four flags to booleans, strip text ---
+        hereditary = profile.get("hereditary_illness", {}) or {}
+        for flag in ("diabetes", "blood_pressure", "heart_disease", "asthma"):
+            cleaned["hereditary_illness"][flag] = bool(hereditary.get(flag, False))
+        cleaned["hereditary_illness"]["other"] = str(hereditary.get("other", "")).strip()
+        cleaned["hereditary_illness"]["notes"] = str(hereditary.get("notes", "")).strip()
+
+        return cleaned, errors
+
+
