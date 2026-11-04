@@ -1,72 +1,85 @@
 """
-logic_managerClass.py
+logic_manager.py
 
-Object-oriented refactor of logic_manager.py (Phase 2).
+Responsible for business rules and domain logic only. Acts as the
+"Domain Brain": takes a fresh AI-extracted reading plus the user's
+stored history, applies clinical threshold rules in plain Python, and
+decides an outcome for the record. It never diagnoses a condition,
+prescribes a treatment, or replaces professional medical advice - it
+only decides what is worth flagging for the user to discuss with a
+doctor. It also validates the user's standing medical profile
+(medications, blood group, allergies, emergency contacts, hereditary
+illness) - reference data, not measurements, so no thresholds/scoring.
 
-Same responsibility as before - the "Domain Brain": take a fresh
-AI-extracted reading plus the user's stored history, apply clinical
-threshold rules in plain Python, and decide an outcome for the record.
-It never diagnoses, prescribes, or replaces professional medical
-advice - it only decides what is worth flagging for discussion with a
-doctor.
+Phase 2 - fully object-oriented
+-------------------------------
+There is no remaining procedural business logic in this module: every
+rule, threshold set, classification, and the orchestration itself lives
+in a class. The three module-level names other modules still import
+(process_ai_record, validate_medical_profile, METRIC_LABELS) are kept
+at the bottom purely as thin backwards-compatibility shims that
+delegate to the classes, so io_gui.py and data_manager need no change.
 
-What changed from the procedural version
------------------------------------------
-- The business rules that used to be inlined inside
-  evaluate_health_metrics()/analyze_recent_changes() are now first-class
-  `Rule` objects (UrgentThresholdRule, PersistentTrendRule,
-  RecentChangeRule). The engine runs them polymorphically - it never
-  branches on a rule's concrete type.
-- The per-metric thresholds/labels/units that used to be module-level
-  dicts are now encapsulated behind a `Measurement` hierarchy, one
-  subclass per tracked metric.
-- process_ai_record() is now LogicManager.process(). The single entry
-  point is unchanged in contract: raw AI dict (or None) + history in,
-  one finalised, JSON-serialisable report dict out.
+Rules for this module:
+- No print() or input() calls here (except inside the __main__ demo
+  block at the bottom, which only runs when this file is executed
+  directly with `python logic_manager.py`, never when imported).
+- No network/AI calls here.
+- No file operations here.
+- Works purely on dicts/lists already handed to it by other modules.
 
 OOP concepts demonstrated here
 ------------------------------
-- Abstract classes / interfaces : Measurement, Rule (both ABCs).
-- Inheritance                   : HeartRate/BloodPressure*/BloodGlucose
-                                  subclass Measurement; the three Rule
+- Abstract classes / interfaces : MetricSpec, Rule (both ABCs).
+- Inheritance                   : HeartRate / SystolicBloodPressure /
+                                  DiastolicBloodPressure / BloodGlucose
+                                  subclass MetricSpec; the three Rule
                                   subclasses specialise Rule.
 - Polymorphism                  : LogicManager.evaluate() calls
                                   rule.evaluate(...) without knowing the
-                                  concrete rule; Measurement.classify().
+                                  concrete rule; MetricSpec.classify().
 - Encapsulation                 : thresholds held as private attrs set
                                   at construction, not mutable globals.
 - Aggregation                   : LogicManager holds a list of Rule
                                   objects that exist independently of it.
 - Composition                   : a processed report owns its Finding
-                                  objects (they have no life outside it).
+                                  objects (they have no life outside it);
+                                  LogicManager owns its SafetyGuardrail.
 - Association                   : each Rule refers to a MetricSpec it
                                   evaluates, without owning its lifecycle.
 
 SOLID evidence
 --------------
-- SRP : each Rule has exactly one reason to change (its own threshold/
-        pattern); LogicManager only orchestrates, scores, and decides.
+- SRP : each Rule has one reason to change; LogicManager orchestrates;
+        MedicalProfileValidator is wholly separate from vital-sign logic.
 - OCP : adding a new clinical rule means writing a new Rule subclass and
         adding it to the list passed to LogicManager - zero edits to the
         engine. See LogicManager.default() for the current rule set.
 - LSP : any Rule is substitutable wherever the engine expects one; any
-        Measurement is substitutable wherever a reading is classified.
+        MetricSpec is substitutable wherever a reading is classified.
 
-Input/output contract (unchanged from logic_manager.py)
--------------------------------------------------------
-Fresh AI output (`ai_extracted`) is whatever
-ai_manager.call_ai_with_retry() returns: either None, or a dict shaped
-like {"heart_rate": num/None,
-      "blood_pressure": {"systolic": num/None, "diastolic": num/None}/None,
-      "blood_glucose": num/None,
-      "report_date": "YYYY-MM-DD"/None,
-      "is_medical_report": bool (optional),
-      "classification_reason": str (optional)}.
+Input contract
+--------------
+Fresh AI output (`ai_extracted`) is whatever ai_manager.call_ai_with_retry()
+returns: either None (the AI Manager gave up after retrying), or a dict
+shaped like:
+    {"heart_rate": number or None,
+     "blood_pressure": {"systolic": number or None,
+                         "diastolic": number or None} or None,
+     "blood_glucose": number or None,
+     "report_date": "YYYY-MM-DD" or None,
+     "is_medical_report": bool (optional),
+     "classification_reason": str (optional)}
 
-Historical records are whatever data_manager.load_health_records()
-returns: a list of dicts using the flat metric key names, assumed
-sorted oldest to newest (metric keys may sit at the top level for
-CLI-entered records, or under "metrics" for AI-pipeline records).
+Historical records (`historical_records`) are whatever
+data_manager.load_health_records() returns: a list of dicts using the
+flat key names in config.SUPPORTED_METRICS, assumed sorted oldest to
+newest (metric keys may sit at the top level for CLI-entered records,
+or under "metrics" for AI-pipeline records).
+
+LogicManager.process() is the single entry point that bridges the AI
+shape and history, applies all business rules, and returns one
+finalized, JSON-serialisable report dict.
 """
 
 from __future__ import annotations
@@ -76,7 +89,6 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
-
 # ===========================================================================
 # Enumerations - small, self-describing value types
 # ===========================================================================
@@ -84,8 +96,8 @@ from typing import Any, Dict, List, Optional, Tuple
 class Tier(Enum):
     """
     Severity tier for a single reading, independent of trend history.
-    Mirrors the old _metric_classification() return values ("SEVERE",
-    "ELEVATED", "NORMAL") but as a proper type instead of bare strings.
+    Replaces the old _metric_classification() bare strings ("SEVERE",
+    "ELEVATED", "NORMAL") with a proper type.
     """
     NORMAL = "NORMAL"
     ELEVATED = "ELEVATED"
@@ -103,6 +115,7 @@ class Decision(Enum):
     URGENT = "URGENT"
     FLAGGED = "FLAGGED"
     ACCEPTED = "ACCEPTED"
+
 
 # ===========================================================================
 # MetricSpec hierarchy - ABSTRACT CLASS + INHERITANCE + ENCAPSULATION
@@ -170,7 +183,6 @@ class MetricSpec(ABC):
     def is_improvement(self, delta: float) -> bool:
         """For 'higher is worse' metrics a decrease improves. Overridable (LSP)."""
         return delta < 0
-
 class HeartRate(MetricSpec):
     def __init__(self):
         super().__init__(
@@ -201,8 +213,7 @@ class BloodGlucose(MetricSpec):
             key="blood_glucose", label="Blood Glucose", unit="mmol/L",
             urgent_at=13.9, flag_above=7.0, tolerance=0.5,
         )
-
-# ===========================================================================
+    # ===========================================================================
 # Value object produced by the rules / engine
 # ===========================================================================
 
@@ -229,20 +240,18 @@ class Finding:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"metric": self._metric, "status": self._status, **self._extra}
+
 # ===========================================================================
 # Rule hierarchy - ABSTRACT CLASS + INHERITANCE + POLYMORPHISM (OCP core)
 # ===========================================================================
 
 class Rule(ABC):
     """
-    Abstract business rule. A rule looks at the current reading for ONE
-    metric plus the user's history and decides whether to raise a
-    Finding. Subclasses implement evaluate(); the engine runs them
-    without ever checking their concrete type (polymorphism), so a new
-    rule can be added without touching LogicManager (OCP).
-
-    Association: a Rule refers to the MetricSpec it evaluates but does
-    not own it (specs are shared across rules).
+    Abstract business rule for ONE metric. Subclasses implement
+    evaluate(); the engine runs them without checking concrete type
+    (polymorphism), so a new rule can be added without touching
+    LogicManager (OCP). Association: a Rule refers to the MetricSpec it
+    evaluates but does not own it (specs are shared across rules).
     """
 
     def __init__(self, spec: MetricSpec):
@@ -261,6 +270,7 @@ class Rule(ABC):
         newest (so the most recent past reading is history_values[-1]).
         """
         raise NotImplementedError
+
 
 class UrgentThresholdRule(Rule):
     """
@@ -283,26 +293,24 @@ class UrgentThresholdRule(Rule):
         )
 class PersistentTrendRule(Rule):
     """
-    Tier 2 from the old evaluate_health_metrics() - the MULTI-CONDITION
-    rule the brief specifically requires preserved. It fires only when
-    BOTH conditions hold:
+    Tier 2 - the genuinely MULTI-CONDITION rule the brief requires
+    preserved. Fires only when BOTH hold:
       (a) the current reading exceeds the lower flag threshold, AND
-      (b) the reading has been strictly increasing across the last three
+      (b) it has been strictly increasing across the last three
           consecutive readings (today > previous visit > the one before).
     Either condition alone is not enough.
     """
 
     def __init__(self, spec: MetricSpec, visits: int = 3):
         super().__init__(spec)
-        self._visits = visits  # kept for clarity/extensibility
+        self._visits = visits
 
     def evaluate(self, current_value, history_values):
-        # Condition (a): above the flag floor, and an urgent reading was
-        # already handled by UrgentThresholdRule, so skip those here.
         if current_value is None:
             return None
         if current_value <= self._spec.flag_above:
             return None
+        # An urgent reading is already handled by UrgentThresholdRule.
         if self._spec.is_urgent(current_value):
             return None
         if len(history_values) < 2:
@@ -311,7 +319,6 @@ class PersistentTrendRule(Rule):
         past_1 = history_values[-1]
         past_2 = history_values[-2]
 
-        # Condition (b): strictly rising across three consecutive readings.
         if (past_1 is not None and past_2 is not None
                 and current_value > past_1 > past_2):
             return Finding(
@@ -323,4 +330,5 @@ class PersistentTrendRule(Rule):
                 ),
             )
         return None
+
 
