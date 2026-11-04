@@ -973,6 +973,8 @@ def sidebar_nav():
             go("trends")
         if st.button("Consultation", use_container_width=True):
             go("consultation")
+        if st.button("Medical Profile", use_container_width=True):
+            go("profile")
         st.markdown("---")
         if st.button(
             "Log Out",
@@ -1011,6 +1013,11 @@ ALLOWED_FILE_EXTENSIONS = {
 
 MAX_PDF_SIZE_MB = 30
 MAX_IMAGE_SIZE_MB = 10
+
+# Blood groups offered on the Medical Profile page; mirrors
+# logic_manager.VALID_BLOOD_GROUPS (minus the blank "unknown" option,
+# chosen by selecting "Not set").
+BLOOD_GROUP_OPTIONS = ["Not set", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
 
 def validate_username(username: str) -> str:
 
@@ -1611,6 +1618,144 @@ def show_dashboard():
             "see the Consultation page for details.</span>",
             unsafe_allow_html=True,
         )
+
+def show_profile():
+    hero("Medical Profile", "Your standing health information, ready for any appointment.")
+
+    username = current_user()
+    profile = data_manager.load_medical_profile(username)
+
+    # --- Blood group ---
+    with st.container(border=True):
+        st.subheader("Blood group")
+        current_bg = profile.get("blood_group") or "Not set"
+        bg_index = BLOOD_GROUP_OPTIONS.index(current_bg) if current_bg in BLOOD_GROUP_OPTIONS else 0
+        blood_group_choice = st.selectbox(
+            "Blood group", BLOOD_GROUP_OPTIONS, index=bg_index
+        )
+
+    # --- Medications ---
+    with st.container(border=True):
+        st.subheader("Medications")
+        st.caption("List each current medication, its dose and how often you take it.")
+        med_count = st.number_input(
+            "How many medications?", min_value=0, max_value=20,
+            value=len(profile.get("medications", [])), step=1, key="med_count",
+        )
+        medications = []
+        for i in range(int(med_count)):
+            existing = profile["medications"][i] if i < len(profile.get("medications", [])) else {}
+            st.markdown(f"*Medication {i + 1}*")
+            cols = st.columns([3, 2, 2, 3])
+            with cols[0]:
+                name = st.text_input("Name", value=existing.get("name", ""), key=f"med_name_{i}")
+            with cols[1]:
+                amount = st.text_input("Dose amount", value=str(existing.get("dosage_amount") or ""), key=f"med_amt_{i}")
+            with cols[2]:
+                unit = st.text_input("Unit", value=existing.get("dosage_unit", ""), key=f"med_unit_{i}", placeholder="mg")
+            with cols[3]:
+                freq = st.text_input("Frequency", value=existing.get("frequency", ""), key=f"med_freq_{i}", placeholder="twice daily")
+            medications.append({
+                "name": name, "dosage_amount": amount,
+                "dosage_unit": unit, "frequency": freq,
+            })
+
+    # --- Allergies ---
+    with st.container(border=True):
+        st.subheader("Allergies")
+        allergy_count = st.number_input(
+            "How many allergies?", min_value=0, max_value=20,
+            value=len(profile.get("allergies", [])), step=1, key="allergy_count",
+        )
+        allergies = []
+        for i in range(int(allergy_count)):
+            existing = profile["allergies"][i] if i < len(profile.get("allergies", [])) else {}
+            st.markdown(f"*Allergy {i + 1}*")
+            cols = st.columns([3, 3, 2])
+            with cols[0]:
+                allergen = st.text_input("Allergen", value=existing.get("allergen", ""), key=f"alg_name_{i}")
+            with cols[1]:
+                reaction = st.text_input("Reaction", value=existing.get("reaction", ""), key=f"alg_react_{i}")
+            with cols[2]:
+                sev_options = ["", "mild", "moderate", "severe"]
+                sev_existing = str(existing.get("severity", "")).lower()
+                sev_index = sev_options.index(sev_existing) if sev_existing in sev_options else 0
+                severity = st.selectbox("Severity", sev_options, index=sev_index, key=f"alg_sev_{i}")
+            allergies.append({
+                "allergen": allergen, "reaction": reaction, "severity": severity,
+            })
+
+    # --- Emergency contacts ---
+    with st.container(border=True):
+        st.subheader("Emergency contacts")
+        contact_count = st.number_input(
+            "How many contacts?", min_value=0, max_value=10,
+            value=len(profile.get("emergency_contacts", [])), step=1, key="contact_count",
+        )
+        emergency_contacts = []
+        for i in range(int(contact_count)):
+            existing = profile["emergency_contacts"][i] if i < len(profile.get("emergency_contacts", [])) else {}
+            st.markdown(f"*Contact {i + 1}*")
+            cols = st.columns([3, 2, 3, 3])
+            with cols[0]:
+                name = st.text_input("Name", value=existing.get("name", ""), key=f"ec_name_{i}")
+            with cols[1]:
+                relationship = st.text_input("Relationship", value=existing.get("relationship", ""), key=f"ec_rel_{i}")
+            with cols[2]:
+                phone = st.text_input("Phone", value=existing.get("phone", ""), key=f"ec_phone_{i}")
+            with cols[3]:
+                email = st.text_input("Email", value=existing.get("email", ""), key=f"ec_email_{i}")
+            emergency_contacts.append({
+                "name": name, "relationship": relationship,
+                "phone": phone, "email": email,
+            })
+
+    # --- Hereditary illness ---
+    with st.container(border=True):
+        st.subheader("Hereditary illness")
+        st.caption("Tick any conditions that run in your family.")
+        hereditary = profile.get("hereditary_illness", {}) or {}
+        cols = st.columns(4)
+        with cols[0]:
+            diabetes = st.checkbox("Diabetes", value=bool(hereditary.get("diabetes")))
+        with cols[1]:
+            blood_pressure = st.checkbox("Blood pressure", value=bool(hereditary.get("blood_pressure")))
+        with cols[2]:
+            heart_disease = st.checkbox("Heart disease", value=bool(hereditary.get("heart_disease")))
+        with cols[3]:
+            asthma = st.checkbox("Asthma", value=bool(hereditary.get("asthma")))
+        other = st.text_input("Other hereditary condition", value=hereditary.get("other", ""))
+        notes = st.text_input("Notes (e.g. which relative)", value=hereditary.get("notes", ""))
+
+    st.write("")
+    if st.button("Save medical profile", type="primary", use_container_width=True):
+        raw_profile = {
+            "blood_group": "" if blood_group_choice == "Not set" else blood_group_choice,
+            "medications": medications,
+            "allergies": allergies,
+            "emergency_contacts": emergency_contacts,
+            "hereditary_illness": {
+                "diabetes": diabetes,
+                "blood_pressure": blood_pressure,
+                "heart_disease": heart_disease,
+                "asthma": asthma,
+                "other": other,
+                "notes": notes,
+            },
+        }
+
+        # Validation stays in the Logic Manager - never recomputed here.
+        cleaned, errors = logic_manager.validate_medical_profile(raw_profile)
+
+        if errors:
+            st.error("Please fix the following before saving:")
+            for message in errors:
+                st.write("• " + message)
+        elif data_manager.save_medical_profile(username, cleaned):
+            st.success("Medical profile saved.")
+            st.rerun()
+        else:
+            st.error("Could not save your profile. Please try again.")
 
 def show_upload():
 
@@ -2720,5 +2865,7 @@ else:
     elif st.session_state.page == "consultation":
         show_consultation()
 
+    elif st.session_state.page == "profile":
+        show_profile()
     else:
         show_dashboard()
