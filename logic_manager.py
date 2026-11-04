@@ -555,4 +555,49 @@ class MedicalProfileValidator:
 
         return cleaned, errors
 
+# ===========================================================================
+# The engine - LogicManager (replaces process_ai_record)
+# ===========================================================================
 
+class LogicManager:
+    """
+    Orchestrates the business rules over an AI-extracted reading and the
+    user's history, then scores and routes the outcome. Holds its rules
+    by AGGREGATION (passed in, independently reusable) and runs them
+    POLYMORPHICALLY - it never checks a rule's concrete type.
+
+    The single public entry point, process(), keeps the exact same
+    input/output contract as the old logic_manager.process_ai_record(),
+    so data_manager and the IO layer need no changes to consume it.
+    """
+
+    # Specs shared across rules (one per tracked metric), in a fixed,
+    # predictable order matching the old TRACKED_METRICS list.
+    _SPECS = [
+        SystolicBloodPressure(),
+        DiastolicBloodPressure(),
+        BloodGlucose(),
+        HeartRate(),
+    ]
+
+    def __init__(self, rules: List[Rule], guardrail: Optional[SafetyGuardrail] = None):
+        # Aggregation: the rules exist on their own and are handed in.
+        self._rules = list(rules)
+        # Composition: the manager owns its guardrail helper.
+        self._guardrail = guardrail or SafetyGuardrail()
+        self._spec_by_key = {spec.key: spec for spec in self._SPECS}
+
+    @classmethod
+    def default(cls) -> "LogicManager":
+        """
+        Build a LogicManager wired with the project's current rule set.
+        Adding/removing a rule here is the ONLY change needed to change
+        the system's behaviour (OCP) - the engine code below is closed
+        for modification.
+        """
+        rules: List[Rule] = []
+        for spec in cls._SPECS:
+            rules.append(UrgentThresholdRule(spec))
+            rules.append(PersistentTrendRule(spec))
+            rules.append(RecentChangeRule(spec))
+        return cls(rules)
