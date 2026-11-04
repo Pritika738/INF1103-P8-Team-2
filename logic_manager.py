@@ -229,3 +229,37 @@ class Finding:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"metric": self._metric, "status": self._status, **self._extra}
+# ===========================================================================
+# Rule hierarchy - ABSTRACT CLASS + INHERITANCE + POLYMORPHISM (OCP core)
+# ===========================================================================
+
+class Rule(ABC):
+    """
+    Abstract business rule. A rule looks at the current reading for ONE
+    metric plus the user's history and decides whether to raise a
+    Finding. Subclasses implement evaluate(); the engine runs them
+    without ever checking their concrete type (polymorphism), so a new
+    rule can be added without touching LogicManager (OCP).
+
+    Association: a Rule refers to the MetricSpec it evaluates but does
+    not own it (specs are shared across rules).
+    """
+
+    def __init__(self, spec: MetricSpec):
+        self._spec = spec
+
+    @property
+    def spec(self) -> MetricSpec:
+        return self._spec
+
+    @abstractmethod
+    def evaluate(self, current_value: Optional[float],
+                 history_values: List[Optional[float]]) -> Optional[Finding]:
+        """
+        Return a Finding if this rule fires for the given reading, else
+        None. `history_values` is this metric's past readings, oldest to
+        newest (so the most recent past reading is history_values[-1]).
+        """
+        raise NotImplementedError
+
+
