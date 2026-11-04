@@ -9,7 +9,9 @@
         "username": "test",
         "email": "test@gmail.com",
         "salt": "aca761f56b4d1dd85dc476c7a9fd7956",
-        "password_hash": "e7686bb0252b2428ddc988c5528a084a57c471ed57d12d5a4ced7c20670a0ad9"
+        "password_hash": "e7686bb0252b2428ddc988c5528a084a57c471ed57d12d5a4ced7c20670a0ad9",
+        "pin_salt": "2f5cce5f36f52fd118a43ada9356973a",
+        "pin_hash": "fe64444950be007cc9c083a27699877d811563b0812b2f505f6e3cbbc9c32421"
     },
     "test1": {
         "username": "test1",
