@@ -1,6 +1,7 @@
 """AI support package: clients, parsing, retry policy, prompts and tasks.
 
 The orchestrating class, AIManager, lives in the top-level ai_manager.py.
+(Named ai_layer to match io_layer and data_layer.)
 """
 
 from .client import AIClient, AIServiceError, GeminiClient, MockAIClient

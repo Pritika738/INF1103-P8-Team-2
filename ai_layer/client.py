@@ -1,5 +1,5 @@
 """
-ai/client.py
+ai_layer/client.py
 
 The AI "transport" layer: one interface (AIClient) and its concrete
 implementations.
