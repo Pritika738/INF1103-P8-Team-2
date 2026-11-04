@@ -664,3 +664,36 @@ class LogicManager:
                 findings.append(finding)
         return findings
 
+# ----- scoring / routing (same formula as the old pipeline) -----------
+    @staticmethod
+    def _score(urgent: List[Finding], flagged: List[Finding]) -> int:
+        return len(urgent) * 2 + len(flagged)
+
+    def _summary(self, changes, urgent, flagged) -> str:
+        """Deterministic, template-only summary - mirrors generate_dynamic_summary()."""
+        if not changes and not urgent and not flagged:
+            return "All tracked metrics are stable with no notable changes recorded."
+
+        parts = []
+        if urgent:
+            metrics = ", ".join(f.metric for f in urgent)
+            parts.append(
+                f"Urgent: {metrics} at a level that usually warrants "
+                "prompt medical attention"
+            )
+        if flagged:
+            metrics = ", ".join(f.metric for f in flagged)
+            parts.append(f"Persistent upward trend detected in: {metrics}")
+
+        increases = [c.to_dict() for c in changes if "increased" in c.to_dict()["feedback"]]
+        decreases = [c.to_dict() for c in changes if "decreased" in c.to_dict()["feedback"]]
+        if increases:
+            parts.append("Increased since last visit: "
+                         + ", ".join(c["metric"] for c in increases))
+        if decreases:
+            parts.append("Decreased since last visit: "
+                         + ", ".join(c["metric"] for c in decreases))
+
+        parts.append("Please discuss these results with your doctor at "
+                     "your next consultation.")
+        return " | ".join(parts)
