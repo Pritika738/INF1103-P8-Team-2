@@ -22,7 +22,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import io_manager
 import logic_manager
 import data_manager
-import ai_manager, ai_prompt
+import ai_manager
+
+# One AIManager for the whole app. The real Gemini client is injected
+# here, so everything below depends only on the AIClient interface.
+ai_service = ai_manager.AIManager(ai_manager.GeminiClient())
 
 st.set_page_config(
     page_title="PASSAY - Health History and Consultation Prep",
@@ -2117,9 +2121,8 @@ def show_upload():
                     first_page = validated_pages[0]
 
                     with st.spinner("Sending report to the AI Manager..."):
-                        prompt = ai_prompt.build_prompt()
-                        ai_extracted = ai_manager.call_ai_with_retry(
-                            first_page["bytes"], first_page["mime_type"], prompt
+                        ai_extracted = ai_service.extract_report(
+                            first_page["bytes"], first_page["mime_type"]
                         )
 
                         all_records = data_manager.load_health_records()
@@ -2329,12 +2332,10 @@ def show_history():
                         original_bytes = data_manager.get_original_report_bytes(
                             original_entry["stored_filename"]
                         )
-                        prompt = ai_prompt.build_prompt()
                         ai_extracted = (
-                            ai_manager.call_ai_with_retry(
+                            ai_service.extract_report(
                                 original_bytes,
                                 original_entry.get("mime_type", "application/pdf"),
-                                prompt,
                             )
                             if original_bytes
                             else None
@@ -2624,7 +2625,7 @@ def show_consultation():
     ai_narrative = None
     if latest_processed_record:
         with st.spinner("Preparing your consultation summary..."):
-            ai_narrative = ai_manager.generate_consultation_narrative(latest_processed_record)
+            ai_narrative = ai_service.generate_narrative(latest_processed_record)
 
     report = build_report(who, trends, ai_narrative)
 

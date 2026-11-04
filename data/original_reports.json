@@ -128,5 +128,15 @@
     "stored_filename": "c10747ba847d4b29bf836bc39ab25ea5.pdf",
     "mime_type": "application/pdf",
     "content_hash": "125f0c7edd8c6caadc7ae3e7feed822b2040b646f6adedd56b01097b253977cf"
+  },
+  {
+    "report_id": "e16b56fe538444adbee6c1d530a33b2f",
+    "username": "test",
+    "report_date": "2026-10-11",
+    "upload_date": "2026-11-04",
+    "filename": "MedicalReport3.jpg",
+    "stored_filename": "e16b56fe538444adbee6c1d530a33b2f.jpg",
+    "mime_type": "image/jpeg",
+    "content_hash": "b1da4ad5610df19ee83a2e82f4bb3e9babe3f7db8ec80e39067e8a4a93718a5c"
   }
 ]

@@ -1021,5 +1021,84 @@
     "date": "2026-09-22",
     "report_id": "e4af057f60a349738cc60416f65a4758",
     "record_id": "b0098ce6cff34ec59f5bb5ef58433baf"
+  },
+  {
+    "metrics": {
+      "heart_rate": 119,
+      "blood_pressure_systolic": 135,
+      "blood_pressure_diastolic": 91,
+      "blood_glucose": 6.2
+    },
+    "ai_extracted_date": "2026-10-11",
+    "urgent_findings": [],
+    "flagged_trends": [],
+    "recent_changes": [
+      {
+        "metric": "Systolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "classification_changed": true,
+        "previous_classification": "SEVERE",
+        "current_classification": "ELEVATED",
+        "feedback": "Your systolic blood pressure has changed from severe (188) to elevated (135) since your last record."
+      },
+      {
+        "metric": "Diastolic Blood Pressure",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "classification_changed": true,
+        "previous_classification": "SEVERE",
+        "current_classification": "ELEVATED",
+        "feedback": "Your diastolic blood pressure has changed from severe (122) to elevated (91) since your last record."
+      },
+      {
+        "metric": "Blood Glucose",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "classification_changed": true,
+        "previous_classification": "SEVERE",
+        "current_classification": "NORMAL",
+        "feedback": "Your blood glucose has changed from severe (15.4) to normal (6.2) since your last record."
+      },
+      {
+        "metric": "Heart Rate",
+        "status": "CHANGED",
+        "assessment": "improved",
+        "classification_changed": true,
+        "previous_classification": "SEVERE",
+        "current_classification": "ELEVATED",
+        "feedback": "Your heart rate has changed from severe (138) to elevated (119) since your last record."
+      }
+    ],
+    "risk_score": 0,
+    "decision": "ACCEPTED",
+    "recommended_action": "No action needed - keep up with regular check-ups.",
+    "requires_doctor_review": false,
+    "summary": "Please discuss these results with your doctor at your next consultation.",
+    "username": "test",
+    "date": "2026-10-11",
+    "report_id": "e16b56fe538444adbee6c1d530a33b2f",
+    "record_id": "b8dc84aac6d1418aa39084171f8666e1"
+  },
+  {
+    "metrics": {
+      "heart_rate": 119,
+      "blood_pressure_systolic": 135,
+      "blood_pressure_diastolic": 91,
+      "blood_glucose": 6.2
+    },
+    "ai_extracted_date": "2026-10-11",
+    "urgent_findings": [],
+    "flagged_trends": [],
+    "recent_changes": [],
+    "risk_score": 0,
+    "decision": "ACCEPTED",
+    "recommended_action": "No action needed - keep up with regular check-ups.",
+    "requires_doctor_review": false,
+    "summary": "All tracked metrics are stable with no notable changes recorded.",
+    "username": "test",
+    "date": "2026-10-11",
+    "report_id": "e16b56fe538444adbee6c1d530a33b2f",
+    "record_id": "36f6dca5851f44ddbb5d93f3addf2e3e"
   }
 ]
