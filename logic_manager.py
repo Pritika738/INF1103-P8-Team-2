@@ -791,3 +791,26 @@ class LogicManager:
             "summary": summary,
         }
     
+# ===========================================================================
+# Backwards-compatibility shims
+# ---------------------------------------------------------------------------
+# All real logic above is object-oriented. These thin module-level names
+# are kept only so existing callers (io_gui.py's process_ai_record /
+# validate_medical_profile / METRIC_LABELS usage, and data_manager's
+# docstrings) keep working unchanged. Each just delegates to a class.
+# ===========================================================================
+
+# METRIC_LABELS used to be a module-level dict; io_gui.py reads it as
+# logic_manager.METRIC_LABELS.get(key, key). Rebuilt here from the
+# MetricSpec objects so there is still a single source of truth.
+METRIC_LABELS = {spec.key: spec.label for spec in LogicManager._SPECS}
+
+# One shared default engine / validator / guardrail for the shims.
+_default_logic_manager = LogicManager.default()
+_default_profile_validator = MedicalProfileValidator()
+_default_guardrail = SafetyGuardrail()
+
+
+def process_ai_record(ai_extracted, historical_records):
+    """Backwards-compatible shim -> LogicManager.process()."""
+    return _default_logic_manager.process(ai_extracted, historical_records)
