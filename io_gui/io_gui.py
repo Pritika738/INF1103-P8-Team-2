@@ -979,6 +979,8 @@ def sidebar_nav():
             go("consultation")
         if st.button("Medical Profile", use_container_width=True):
             go("profile")
+        if st.button("Settings", use_container_width=True):      # ← ADD THIS
+            go("settings")                                       # ← ADD THIS
         st.markdown("---")
         if st.button(
             "Log Out",
@@ -1022,6 +1024,13 @@ MAX_IMAGE_SIZE_MB = 10
 # logic_manager.VALID_BLOOD_GROUPS (minus the blank "unknown" option,
 # chosen by selecting "Not set").
 BLOOD_GROUP_OPTIONS = ["Not set", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+
+# Dosage units offered on the Medical Profile page; mirrors
+# logic_manager.VALID_DOSAGE_UNITS (blank is a valid, unset choice).
+DOSAGE_UNIT_OPTIONS = [
+    "", "mg", "mcg", "g", "ml", "L", "IU", "%",
+    "units", "tablet(s)", "drop(s)", "puff(s)", "patch(es)",
+]
 
 def validate_username(username: str) -> str:
 
@@ -1235,6 +1244,121 @@ def authenticate_temporary_account(
         account["password_hash"]
     )
 
+# =========================================================
+# QUICK-LOGIN PIN
+# =========================================================
+# A 4-digit PIN is a CONVENIENCE shortcut tied to an existing account,
+# set only after the user has logged in normally at least once - it is
+# NOT a replacement for the username + password. Because a 4-digit PIN
+# is weak by nature (only 10,000 combinations), it is:
+#   - hashed with PBKDF2 + a per-user salt, never stored in plain text
+#     (same scheme as hash_password() above),
+#   - usable only alongside the username (so it is unambiguous across
+#     accounts, since two users could pick the same PIN), and
+#   - rate-limited per session (see PIN_MAX_ATTEMPTS) so it cannot be
+#     brute-forced from the login screen.
+
+PIN_PATTERN = re.compile(r"^\d{4}$")
+PIN_MAX_ATTEMPTS = 5
+
+def validate_pin(pin: str) -> str:
+    """
+    Validate a quick-login PIN. Returns "" if valid, or a human-readable
+    error message if not. A valid PIN is exactly four digits (0-9).
+    """
+    pin = (pin or "").strip()
+    if not pin:
+        return "Please enter a PIN."
+    if not PIN_PATTERN.fullmatch(pin):
+        return "PIN must be exactly 4 digits."
+    return ""
+
+def hash_pin(pin: str, salt_hex: str) -> str:
+    """
+    Hash a PIN with PBKDF2-HMAC-SHA256 and a per-user salt - the same
+    construction as hash_password(), so the stored PIN is never
+    recoverable in plain text.
+    """
+    salt = bytes.fromhex(salt_hex)
+    hashed = hashlib.pbkdf2_hmac(
+        "sha256",
+        pin.encode("utf-8"),
+        salt,
+        PASSWORD_ITERATIONS,
+    )
+    return hashed.hex()
+
+def user_has_pin(username: str) -> bool:
+    """
+    Return True if username has a quick-login PIN set, False otherwise
+    (including when the account does not exist).
+    """
+    account = load_accounts().get(username.strip().lower())
+    return bool(account and account.get("pin_hash") and account.get("pin_salt"))
+
+def set_user_pin(username: str, pin: str) -> bool:
+    """
+    Set (or replace) a user's quick-login PIN, storing only a salted
+    hash of it in their users.json entry. Every OTHER account is left
+    untouched. Returns True on success, False if the account does not
+    exist or the save failed.
+    """
+    username_key = username.strip().lower()
+    accounts = load_accounts()
+    account = accounts.get(username_key)
+    if account is None:
+        return False
+
+    pin_salt = secrets.token_hex(16)
+    account["pin_salt"] = pin_salt
+    account["pin_hash"] = hash_pin(pin, pin_salt)
+    accounts[username_key] = account
+
+    try:
+        save_accounts(accounts)
+        return True
+    except OSError:
+        return False
+
+def remove_user_pin(username: str) -> bool:
+    """
+    Remove a user's quick-login PIN (so they must use their password
+    again). Safe to call when no PIN is set. Returns True on success,
+    False if the account does not exist or the save failed.
+    """
+    username_key = username.strip().lower()
+    accounts = load_accounts()
+    account = accounts.get(username_key)
+    if account is None:
+        return False
+
+    account.pop("pin_salt", None)
+    account.pop("pin_hash", None)
+    accounts[username_key] = account
+
+    try:
+        save_accounts(accounts)
+        return True
+    except OSError:
+        return False
+
+def authenticate_with_pin(username: str, pin: str) -> bool:
+    """
+    Verify a username + quick-login PIN pair against the stored salted
+    PIN hash. Returns False if the account doesn't exist, has no PIN
+    set, or the PIN doesn't match. Uses hmac.compare_digest() to avoid
+    leaking timing information, same as the password check above.
+    """
+    username_key = username.strip().lower()
+    account = load_accounts().get(username_key)
+    if account is None:
+        return False
+    if not (account.get("pin_hash") and account.get("pin_salt")):
+        return False
+
+    entered_hash = hash_pin(pin, account["pin_salt"])
+    return hmac.compare_digest(entered_hash, account["pin_hash"])
+
 def validate_uploaded_report(
     uploaded_file
 ) -> tuple[bool, str]:
@@ -1406,6 +1530,85 @@ def show_login():
             ):
 
                 go("register")
+
+# --- Quick login with PIN -------------------------------------
+        # A convenience shortcut for users who have already set a
+        # 4-digit PIN (see show_settings()). Requires the username too,
+        # so it is unambiguous across accounts, and is rate-limited per
+        # session so it cannot be brute-forced. It never replaces the
+        # password login above - a user without a PIN simply uses that.
+        with st.container(border=True):
+
+            st.subheader("Quick login with PIN")
+            st.caption(
+                "Already set up a PIN? Enter your username and 4-digit "
+                "PIN for faster sign-in."
+            )
+
+            attempts = st.session_state.get("pin_attempts", 0)
+
+            if attempts >= PIN_MAX_ATTEMPTS:
+
+                st.error(
+                    "Too many incorrect PIN attempts. Please sign in "
+                    "with your password above."
+                )
+
+            else:
+
+                pin_username = st.text_input(
+                    "Username",
+                    key="pin_login_username",
+                )
+
+                pin_value = st.text_input(
+                    "4-digit PIN",
+                    type="password",
+                    max_chars=4,
+                    key="pin_login_pin",
+                )
+
+                if st.button(
+                    "Log In with PIN",
+                    use_container_width=True,
+                ):
+
+                    pin_error = validate_pin(pin_value)
+
+                    if not pin_username.strip():
+
+                        st.error("Please enter your username.")
+
+                    elif pin_error:
+
+                        st.error(pin_error)
+
+                    elif authenticate_with_pin(pin_username, pin_value):
+
+                        accounts = load_accounts()
+                        account = accounts[pin_username.strip().lower()]
+
+                        st.session_state.username = account["username"]
+                        st.session_state.email = account["email"]
+                        st.session_state.pop("pin_attempts", None)
+
+                        go("dashboard")
+
+                    else:
+
+                        st.session_state["pin_attempts"] = attempts + 1
+                        remaining = PIN_MAX_ATTEMPTS - st.session_state["pin_attempts"]
+
+                        if remaining > 0:
+                            st.error(
+                                "Incorrect username or PIN. "
+                                f"{remaining} attempt(s) remaining."
+                            )
+                        else:
+                            st.error(
+                                "Too many incorrect PIN attempts. Please "
+                                "sign in with your password above."
+                            )
 
 def show_register():
 
@@ -1656,9 +1859,11 @@ def show_profile():
             with cols[1]:
                 amount = st.text_input("Dose amount", value=str(existing.get("dosage_amount") or ""), key=f"med_amt_{i}")
             with cols[2]:
-                unit = st.text_input("Unit", value=existing.get("dosage_unit", ""), key=f"med_unit_{i}", placeholder="mg")
+                unit_existing = existing.get("dosage_unit", "")
+                unit_index = DOSAGE_UNIT_OPTIONS.index(unit_existing) if unit_existing in DOSAGE_UNIT_OPTIONS else 0
+                unit = st.selectbox("Unit", DOSAGE_UNIT_OPTIONS, index=unit_index, key=f"med_unit_{i}")
             with cols[3]:
-                freq = st.text_input("Frequency", value=existing.get("frequency", ""), key=f"med_freq_{i}", placeholder="twice daily")
+                freq = st.text_input("Frequency", value=existing.get("frequency", ""), key=f"med_freq_{i}", placeholder="e.g. twice daily")
             medications.append({
                 "name": name, "dosage_amount": amount,
                 "dosage_unit": unit, "frequency": freq,
@@ -1679,7 +1884,7 @@ def show_profile():
             with cols[0]:
                 allergen = st.text_input("Allergen", value=existing.get("allergen", ""), key=f"alg_name_{i}")
             with cols[1]:
-                reaction = st.text_input("Reaction", value=existing.get("reaction", ""), key=f"alg_react_{i}")
+                reaction = st.text_input("Reaction", value=existing.get("reaction", ""), key=f"alg_react_{i}", placeholder="e.g. skin/eye")
             with cols[2]:
                 sev_options = ["", "mild", "moderate", "severe"]
                 sev_existing = str(existing.get("severity", "")).lower()
@@ -1704,9 +1909,9 @@ def show_profile():
             with cols[0]:
                 name = st.text_input("Name", value=existing.get("name", ""), key=f"ec_name_{i}")
             with cols[1]:
-                relationship = st.text_input("Relationship", value=existing.get("relationship", ""), key=f"ec_rel_{i}")
+                relationship = st.text_input("Relationship", value=existing.get("relationship", ""), key=f"ec_rel_{i}", placeholder="e.g. mother")
             with cols[2]:
-                phone = st.text_input("Phone", value=existing.get("phone", ""), key=f"ec_phone_{i}")
+                phone = st.text_input("Phone (with country code)", value=existing.get("phone", ""), key=f"ec_phone_{i}", placeholder="e.g. +65 1234 5678")
             with cols[3]:
                 email = st.text_input("Email", value=existing.get("email", ""), key=f"ec_email_{i}")
             emergency_contacts.append({
@@ -1761,6 +1966,77 @@ def show_profile():
         else:
             st.error("Could not save your profile. Please try again.")
 
+def show_settings():
+    hero("Settings", "Manage how you sign in to PASSAY.")
+
+    username = current_user()
+
+    # --- Quick-login PIN -------------------------------------------------
+    with st.container(border=True):
+        st.subheader("Quick-login PIN")
+        has_pin = user_has_pin(username)
+
+        if has_pin:
+            st.caption(
+                "A 4-digit PIN is currently set. You can use it with your "
+                "username on the login screen for faster sign-in. Set a new "
+                "one below to replace it, or remove it entirely."
+            )
+            st.markdown(
+                severity_badge("info") + " &nbsp; "
+                "<span style='color:var(--text-muted);font-size:0.88rem;'>"
+                "PIN is active for this account.</span>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption(
+                "Set a 4-digit PIN to sign in faster next time. You'll "
+                "still enter your username with it. A PIN is a convenience "
+                "shortcut - keep using your password if you prefer."
+            )
+
+        st.write("")
+
+        new_pin = st.text_input(
+            "New 4-digit PIN", type="password", max_chars=4, key="settings_new_pin"
+        )
+        confirm_pin = st.text_input(
+            "Confirm PIN", type="password", max_chars=4, key="settings_confirm_pin"
+        )
+
+        cols = st.columns(2)
+        with cols[0]:
+            if st.button(
+                "Change PIN" if has_pin else "Set PIN",
+                type="primary",
+                use_container_width=True,
+            ):
+                pin_error = validate_pin(new_pin)
+                if pin_error:
+                    st.error(pin_error)
+                elif new_pin != confirm_pin:
+                    st.error("The two PINs do not match.")
+                elif set_user_pin(username, new_pin):
+                    st.success("Your quick-login PIN has been saved.")
+                    st.rerun()
+                else:
+                    st.error("Could not save your PIN. Please try again.")
+
+        with cols[1]:
+            if has_pin:
+                if st.button("Remove PIN", use_container_width=True):
+                    if remove_user_pin(username):
+                        st.success("Your quick-login PIN has been removed.")
+                        st.rerun()
+                    else:
+                        st.error("Could not remove your PIN. Please try again.")
+
+    st.caption(
+        "Security note: a 4-digit PIN is a convenience shortcut, not a "
+        "replacement for your password. It is stored only as a salted hash, "
+        "never in plain text, and is locked after several wrong attempts."
+    )
+    
 def show_upload():
 
     hero(
@@ -2868,5 +3144,9 @@ else:
 
     elif st.session_state.page == "profile":
         show_profile()
+
+    elif st.session_state.page == "settings":    # ← ADD THIS
+        show_settings() 
+                                  # ← ADD THIS
     else:
         show_dashboard()

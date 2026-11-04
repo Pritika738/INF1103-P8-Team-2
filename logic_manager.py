@@ -603,11 +603,17 @@ def process_ai_record(
 
 VALID_BLOOD_GROUPS = ["", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
 VALID_ALLERGY_SEVERITIES = ["mild", "moderate", "severe"]
+VALID_DOSAGE_UNITS = [
+    "", "mg", "mcg", "g", "ml", "L", "IU", "%",
+    "units", "tablet(s)", "drop(s)", "puff(s)", "patch(es)",
+]
 
-# A deliberately permissive phone check: optional leading "+", then digits,
-# spaces and dashes only, 6-20 characters total. The goal is to catch obvious
-# junk ("abc"), not to enforce any one country's numbering plan.
-_PHONE_RE = re.compile(r"^\+?[0-9][0-9 \-]{5,19}$")
+# A deliberately permissive phone check: a mandatory leading "+" and country
+# code (so an emergency contact's number is always dialable from abroad),
+# then digits, spaces and dashes only. The goal is to catch obvious junk
+# ("abc") and a missing country code, not to enforce any one country's
+# full numbering plan.
+_PHONE_RE = re.compile(r"^\+[1-9][0-9 \-]{5,18}$")
 
 def validate_medical_profile(profile: Dict[str, Any]):
     """
@@ -668,10 +674,14 @@ def validate_medical_profile(profile: Dict[str, Any]):
             if amount < 0:
                 errors.append(f"Medication '{name}': dosage cannot be negative.")
                 continue
+        unit = str(med.get("dosage_unit", "")).strip()
+        if unit and unit not in VALID_DOSAGE_UNITS:
+            errors.append(f"Medication '{name}': '{unit}' is not a recognised dosage unit.")
+            unit = ""
         cleaned["medications"].append({
             "name": name,
             "dosage_amount": amount,
-            "dosage_unit": str(med.get("dosage_unit", "")).strip(),
+            "dosage_unit": unit,
             "frequency": str(med.get("frequency", "")).strip(),
         })
 
@@ -705,7 +715,10 @@ def validate_medical_profile(profile: Dict[str, Any]):
             errors.append(f"Emergency contact '{name}': a phone number is required.")
             continue
         if not _PHONE_RE.fullmatch(phone):
-            errors.append(f"Emergency contact '{name}': phone number looks invalid.")
+            errors.append(
+                f"Emergency contact '{name}': phone number must include the "
+                "country code, e.g. +65 1234 5678."
+            )
             continue
         cleaned["emergency_contacts"].append({
             "name": name,
