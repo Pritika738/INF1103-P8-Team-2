@@ -814,3 +814,12 @@ _default_guardrail = SafetyGuardrail()
 def process_ai_record(ai_extracted, historical_records):
     """Backwards-compatible shim -> LogicManager.process()."""
     return _default_logic_manager.process(ai_extracted, historical_records)
+
+def validate_medical_profile(profile):
+    """Backwards-compatible shim -> MedicalProfileValidator.validate()."""
+    return _default_profile_validator.validate(profile)
+
+
+def enforce_safety_guardrails(ai_explanation):
+    """Backwards-compatible shim -> SafetyGuardrail.enforce()."""
+    return _default_guardrail.enforce(ai_explanation)
