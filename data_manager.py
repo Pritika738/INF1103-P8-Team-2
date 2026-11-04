@@ -34,8 +34,8 @@ from config import (
     ORIGINAL_REPORTS_FILE,
     LATEST_REPORTS_LIMIT,
     MAX_RETAINED_SUMMARY_PDFS,
+    MEDICAL_PROFILES_FILE,
 )
-
 
 def _backup_corrupted_file(file_path):
     """
@@ -48,7 +48,6 @@ def _backup_corrupted_file(file_path):
         shutil.copy2(file_path, file_path + ".bak")
     except OSError:
         pass
-
 
 def load_health_records(file_path=HEALTH_RECORDS_FILE):
     """
@@ -78,7 +77,6 @@ def load_health_records(file_path=HEALTH_RECORDS_FILE):
 
     return data
 
-
 def save_health_records(records, file_path=HEALTH_RECORDS_FILE):
     """
     Save the given list of health record dictionaries to the JSON file.
@@ -106,7 +104,6 @@ def save_health_records(records, file_path=HEALTH_RECORDS_FILE):
     except OSError:
         return False
 
-
 def add_health_record(record, file_path=HEALTH_RECORDS_FILE):
     """
     Append a single health record dictionary to the stored records
@@ -117,7 +114,6 @@ def add_health_record(record, file_path=HEALTH_RECORDS_FILE):
     records = load_health_records(file_path)
     records.append(record)
     return save_health_records(records, file_path)
-
 
 def save_record(record, file_path=HEALTH_RECORDS_FILE):
     """
@@ -144,7 +140,6 @@ def save_record(record, file_path=HEALTH_RECORDS_FILE):
     record_to_save.setdefault("date", _date.today().isoformat())
     record_to_save.setdefault("record_id", uuid.uuid4().hex)
     return add_health_record(record_to_save, file_path)
-
 
 def update_record_date(record_id, new_date, file_path=HEALTH_RECORDS_FILE):
     """
@@ -179,7 +174,6 @@ def update_record_date(record_id, new_date, file_path=HEALTH_RECORDS_FILE):
 
     return save_health_records(records, file_path)
 
-
 def backfill_record_ids(file_path=HEALTH_RECORDS_FILE):
     """
     Give every stored record that is missing a "record_id" a new one,
@@ -209,7 +203,6 @@ def backfill_record_ids(file_path=HEALTH_RECORDS_FILE):
 
     return added
 
-
 def get_records_by_date(target_date, file_path=HEALTH_RECORDS_FILE):
     """
     Find all stored records whose "date" field matches `target_date`.
@@ -226,7 +219,6 @@ def get_records_by_date(target_date, file_path=HEALTH_RECORDS_FILE):
     """
     records = load_health_records(file_path)
     return [record for record in records if record.get("date") == target_date]
-
 
 def get_latest_reports(records, limit=LATEST_REPORTS_LIMIT):
     """
@@ -266,7 +258,6 @@ def get_latest_reports(records, limit=LATEST_REPORTS_LIMIT):
     oldest_first = sorted(latest_indexed, key=sort_key)
     return [record for _, record in oldest_first]
 
-
 # --- Consultation-summary PDF persistence ---------------------------------
 # These never touch health_records.json - generated summary PDFs and
 # their metadata are tracked completely separately, so pruning old
@@ -279,7 +270,6 @@ def _safe_filename_component(value):
     and underscores only, everything else replaced with "_".
     """
     return re.sub(r"[^A-Za-z0-9_-]", "_", str(value)) or "unknown"
-
 
 def save_consultation_pdf(
     pdf_bytes,
@@ -383,7 +373,6 @@ def save_consultation_pdf(
 
     return entry
 
-
 def find_consultation_pdf_by_source(
     username, source_record_id, summaries_file=CONSULTATION_SUMMARIES_FILE
 ):
@@ -421,7 +410,6 @@ def find_consultation_pdf_by_source(
             return entry
     return None
 
-
 def list_consultation_pdfs(username, summaries_file=CONSULTATION_SUMMARIES_FILE):
     """
     List previously generated consultation-summary PDFs for one user,
@@ -447,7 +435,6 @@ def list_consultation_pdfs(username, summaries_file=CONSULTATION_SUMMARIES_FILE)
         reverse=True,
     )
 
-
 def get_consultation_pdf_bytes(filename, pdf_dir=CONSULTATION_PDF_DIR):
     """
     Read back a previously saved consultation-summary PDF's raw bytes
@@ -471,7 +458,6 @@ def get_consultation_pdf_bytes(filename, pdf_dir=CONSULTATION_PDF_DIR):
     except OSError:
         return None
 
-
 # --- Original medical report file persistence ------------------------------
 # The actual uploaded PDF/image, kept byte-for-byte as uploaded - distinct
 # from both health_records.json (the AI Manager's extracted numbers) and
@@ -487,7 +473,6 @@ def _guess_extension(mime_type):
         "image/png": ".png",
         "image/jpeg": ".jpg",
     }.get(mime_type, "")
-
 
 def save_original_report(
     file_bytes,
@@ -568,7 +553,6 @@ def save_original_report(
 
     return entry
 
-
 def list_original_reports(username, metadata_file=ORIGINAL_REPORTS_FILE):
     """
     List all original uploaded medical report files for one user,
@@ -586,7 +570,6 @@ def list_original_reports(username, metadata_file=ORIGINAL_REPORTS_FILE):
     entries = load_health_records(metadata_file)
     user_entries = [e for e in entries if e.get("username") == username]
     return sorted(user_entries, key=lambda e: e.get("report_date") or "", reverse=True)
-
 
 def get_original_report_bytes(stored_filename, reports_dir=ORIGINAL_REPORTS_DIR):
     """
@@ -609,7 +592,6 @@ def get_original_report_bytes(stored_filename, reports_dir=ORIGINAL_REPORTS_DIR)
     except OSError:
         return None
 
-
 def get_original_report_by_id(report_id, metadata_file=ORIGINAL_REPORTS_FILE):
     """
     Find one original report's metadata by its report_id - used to
@@ -629,3 +611,139 @@ def get_original_report_by_id(report_id, metadata_file=ORIGINAL_REPORTS_FILE):
         if entry.get("report_id") == report_id:
             return entry
     return None
+
+# --- Medical profile persistence -------------------------------------------
+# A user's standing medical profile: current medications & dosages, blood
+# group, allergies, emergency contacts and hereditary illness flags. Unlike
+# health_records.json (an append-only list of dated readings), a profile is
+# ONE current record per user, so these are stored as a JSON OBJECT keyed by
+# username and each save REPLACES that user's profile rather than appending.
+# Persistence only - all validation (dosage numeric, phone format, blood-group
+# enum, etc.) belongs in logic_manager, and all user messaging in io_manager.
+
+def get_default_medical_profile():
+    """
+    Return a fresh, empty medical-profile dict with every expected
+    section present, so callers (GUI/logic) can rely on the shape
+    without defensive key-checking. A new dict is built on every call,
+    so it is never shared or mutated across callers.
+
+    Shape:
+        {
+            "medications":   [ {"name", "dosage_amount", "dosage_unit",
+                                 "frequency"}, ... ],
+            "blood_group":   str,   # e.g. "O+", "" if unknown
+            "allergies":     [ {"allergen", "reaction", "severity"}, ... ],
+            "emergency_contacts": [ {"name", "relationship", "phone",
+                                     "email"}, ... ],
+            "hereditary_illness": {
+                "diabetes":       bool,
+                "blood_pressure": bool,
+                "heart_disease":  bool,
+                "asthma":         bool,
+                "other":          str,   # free text, "" if none
+                "notes":          str,   # e.g. which relative, "" if none
+            },
+        }
+    """
+    return {
+        "medications": [],
+        "blood_group": "",
+        "allergies": [],
+        "emergency_contacts": [],
+        "hereditary_illness": {
+            "diabetes": False,
+            "blood_pressure": False,
+            "heart_disease": False,
+            "asthma": False,
+            "other": "",
+            "notes": "",
+        },
+    }
+
+def _load_all_medical_profiles(profiles_file=MEDICAL_PROFILES_FILE):
+    """
+    Load the raw {username: profile} mapping from the profiles file.
+
+    Mirrors load_health_records()'s safe handling, but for a JSON
+    OBJECT rather than a list: a missing file yields {}, and invalid
+    JSON (or valid JSON that isn't an object) is backed up to
+    "<profiles_file>.bak" before {} is returned, so a later save can
+    never silently destroy an unreadable file.
+    """
+    if not os.path.exists(profiles_file):
+        return {}
+
+    try:
+        with open(profiles_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError:
+        _backup_corrupted_file(profiles_file)
+        return {}
+    except OSError:
+        return {}
+
+    if not isinstance(data, dict):
+        _backup_corrupted_file(profiles_file)
+        return {}
+
+    return data
+
+def load_medical_profile(username, profiles_file=MEDICAL_PROFILES_FILE):
+    """
+    Load one user's medical profile.
+
+    Returns the stored profile dict for `username`, or a fresh
+    get_default_medical_profile() if the user has none yet (so callers
+    always get a complete, well-shaped dict and never a KeyError).
+    Any sections missing from a stored profile (e.g. one saved before a
+    new section existed) are filled in from the default, so the returned
+    dict always has every expected key.
+
+    Never raises - relies on _load_all_medical_profiles()'s own safe
+    handling of a missing or corrupted file.
+    """
+    profiles = _load_all_medical_profiles(profiles_file)
+    stored = profiles.get(username)
+
+    profile = get_default_medical_profile()
+    if isinstance(stored, dict):
+        # Merge known top-level sections; nested hereditary flags are
+        # merged key-by-key so a newly added flag defaults correctly
+        # instead of disappearing from an older stored profile.
+        for key, default_value in profile.items():
+            if key not in stored:
+                continue
+            if key == "hereditary_illness" and isinstance(stored[key], dict):
+                merged = dict(default_value)
+                merged.update(stored[key])
+                profile[key] = merged
+            else:
+                profile[key] = stored[key]
+        # Preserve bookkeeping stamped by save_medical_profile().
+        if "last_updated" in stored:
+            profile["last_updated"] = stored["last_updated"]
+
+    return profile
+
+def save_medical_profile(username, profile, profiles_file=MEDICAL_PROFILES_FILE):
+    """
+    Save (replace) one user's medical profile, preserving every OTHER
+    user's profile untouched.
+
+    Writes the whole {username: profile} object back atomically via
+    save_health_records() (same temp-file-then-os.replace() strategy),
+    so a reader never sees a half-written profiles file. Stamps today's
+    date onto a COPY of the profile as "last_updated" (bookkeeping about
+    when it was saved, not a medical judgment - in scope here); the
+    caller's original dict is never mutated.
+
+    Returns True on success, False if the write failed.
+    """
+    profiles = _load_all_medical_profiles(profiles_file)
+
+    profile_to_save = dict(profile)
+    profile_to_save["last_updated"] = _date.today().isoformat()
+
+    profiles[username] = profile_to_save
+    return save_health_records(profiles, profiles_file)

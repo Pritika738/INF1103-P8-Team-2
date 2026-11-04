@@ -29,6 +29,7 @@ CONSULTATION_SUMMARIES_FILE = os.path.join(DATA_DIR, "consultation_summaries.jso
 # and the consultation-summary PDFs above (AI Manager's own output).
 ORIGINAL_REPORTS_DIR = os.path.join(DATA_DIR, "original_reports")
 ORIGINAL_REPORTS_FILE = os.path.join(DATA_DIR, "original_reports.json")
+MEDICAL_PROFILES_FILE = os.path.join(DATA_DIR, "medical_profiles.json")
 
 # How many report dates are used for active trend analysis and
 # consultation preparation - older reports stay visible in full in
