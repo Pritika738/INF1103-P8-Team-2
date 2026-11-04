@@ -170,3 +170,34 @@ class MetricSpec(ABC):
     def is_improvement(self, delta: float) -> bool:
         """For 'higher is worse' metrics a decrease improves. Overridable (LSP)."""
         return delta < 0
+
+class HeartRate(MetricSpec):
+    def __init__(self):
+        super().__init__(
+            key="heart_rate", label="Heart Rate", unit="bpm",
+            urgent_at=130, flag_above=100, tolerance=5,
+        )
+
+
+class SystolicBloodPressure(MetricSpec):
+    def __init__(self):
+        super().__init__(
+            key="blood_pressure_systolic", label="Systolic Blood Pressure",
+            unit="mmHg", urgent_at=180, flag_above=130, tolerance=5,
+        )
+
+
+class DiastolicBloodPressure(MetricSpec):
+    def __init__(self):
+        super().__init__(
+            key="blood_pressure_diastolic", label="Diastolic Blood Pressure",
+            unit="mmHg", urgent_at=120, flag_above=80, tolerance=4,
+        )
+
+
+class BloodGlucose(MetricSpec):
+    def __init__(self):
+        super().__init__(
+            key="blood_glucose", label="Blood Glucose", unit="mmol/L",
+            urgent_at=13.9, flag_above=7.0, tolerance=0.5,
+        )
