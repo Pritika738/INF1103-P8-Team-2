@@ -1,7 +1,7 @@
 """
 tests/test_ai_manager.py
 
-Tests for the AI Manager and the ai/ package. No live API is used:
+Tests for the AI Manager and the ai_layer package. No live API is used:
 GeminiClient is tested with the Google SDK patched out, and AIManager is
 tested with MockAIClient, which returns scripted replies.
 
@@ -15,11 +15,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from google.genai import errors as genai_errors
 
-from ai import (
+from ai_layer import (
     AIClient, AIServiceError, AITask, ExtractionTask, GeminiClient,
     MockAIClient, NarrativeTask, ResponseParser, RetryPolicy, VerificationTask,
 )
-from ai.prompts import PromptBuilder
+from ai_layer.prompts import PromptBuilder
 from ai_manager import AIManager
 
 PDF = "application/pdf"
@@ -422,7 +422,7 @@ def _patched_sdk(**configure):
     """Patch genai.Client; `configure` sets up generate_content (side_effect/return_value)."""
     fake = MagicMock()
     fake.models.generate_content.configure_mock(**configure)
-    return patch("ai.client.genai.Client", return_value=fake), fake
+    return patch("ai_layer.client.genai.Client", return_value=fake), fake
 
 
 class TestGeminiClient:

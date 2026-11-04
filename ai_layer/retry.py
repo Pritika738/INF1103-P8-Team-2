@@ -1,5 +1,5 @@
 """
-ai/retry.py
+ai_layer/retry.py
 
 Retry behaviour, kept separate from AIManager (Single Responsibility).
 """

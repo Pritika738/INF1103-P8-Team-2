@@ -28,6 +28,10 @@ import ai_manager
 # here, so everything below depends only on the AIClient interface.
 ai_service = ai_manager.AIManager(ai_manager.GeminiClient())
 
+# One DataManager for the whole app. It reads and writes the real files
+# configured in config.py; tests build their own with temporary files.
+data_service = data_manager.DataManager.create()
+
 st.set_page_config(
     page_title="PASSAY - Health History and Consultation Prep",
     page_icon="🩺",
@@ -607,7 +611,7 @@ def latest_record_for_user(records):
     Dashboard must show exactly what the latest report says, including
     "Not Available" where it says nothing.
     """
-    latest = data_manager.get_latest_reports(records, limit=1)
+    latest = data_service.get_latest_reports(records, limit=1)
     return latest[0] if latest else None
 
 
@@ -623,7 +627,7 @@ def build_record_trends(records):
     than being worked out again here.
 
     Args:
-        records: list of dicts from data_manager.load_health_records(),
+        records: list of dicts from data_service.load_health_records(),
             already filtered to one user if relevant.
 
     Returns:
@@ -1748,7 +1752,7 @@ def show_dashboard():
     hero("Dashboard", ("Welcome back, " + name + "!") if name else "Your health overview")
 
     # Loaded through the Data Manager - never read the JSON file here.
-    all_records = data_manager.load_health_records()
+    all_records = data_service.load_health_records()
     my_records = records_for_current_user(all_records)
 
     if not my_records:
@@ -1830,7 +1834,7 @@ def show_profile():
     hero("Medical Profile", "Your standing health information, ready for any appointment.")
 
     username = current_user()
-    profile = data_manager.load_medical_profile(username)
+    profile = data_service.load_medical_profile(username)
 
     # --- Blood group ---
     with st.container(border=True):
@@ -1960,7 +1964,7 @@ def show_profile():
             st.error("Please fix the following before saving:")
             for message in errors:
                 st.write("• " + message)
-        elif data_manager.save_medical_profile(username, cleaned):
+        elif data_service.save_medical_profile(username, cleaned):
             st.success("Medical profile saved.")
             st.rerun()
         else:
@@ -2401,7 +2405,7 @@ def show_upload():
                             first_page["bytes"], first_page["mime_type"]
                         )
 
-                        all_records = data_manager.load_health_records()
+                        all_records = data_service.load_health_records()
                         user_records = records_for_current_user(all_records)
 
                         processed_record = logic_manager.process_ai_record(
@@ -2451,7 +2455,7 @@ def show_upload():
                         # fails, the extracted health data is still saved
                         # below - losing the backup copy of the original
                         # file shouldn't also block the user's health data.
-                        original_entry = data_manager.save_original_report(
+                        original_entry = data_service.save_original_report(
                             file_bytes=first_page["bytes"],
                             original_filename=first_page["name"],
                             mime_type=first_page["mime_type"],
@@ -2467,7 +2471,7 @@ def show_upload():
                                 "History."
                             )
 
-                        saved = data_manager.save_record(record_to_save)
+                        saved = data_service.save_record(record_to_save)
 
                         if not saved:
                             st.error(
@@ -2508,10 +2512,10 @@ def show_history():
 
     # Give any record saved before record_id existed one now, so it can
     # be found and corrected below. A no-op write when nothing's missing.
-    data_manager.backfill_record_ids()
+    data_service.backfill_record_ids()
 
     # Loaded through the Data Manager - never read the JSON file here.
-    all_records = data_manager.load_health_records()
+    all_records = data_service.load_health_records()
     my_records = records_for_current_user(all_records)
 
     if not my_records:
@@ -2584,7 +2588,7 @@ def show_history():
             new_date = st.date_input("Correct report date", value=date.today())
 
             if st.button("Update Date"):
-                if data_manager.update_record_date(selected_id, new_date.isoformat()):
+                if data_service.update_record_date(selected_id, new_date.isoformat()):
                     st.success("Date updated.")
                     st.rerun()
                 else:
@@ -2596,7 +2600,7 @@ def show_history():
             # the user explicitly confirms - this never overwrites a
             # date on its own.
             original_entry = (
-                data_manager.get_original_report_by_id(selected_record["report_id"])
+                data_service.get_original_report_by_id(selected_record["report_id"])
                 if selected_record and selected_record.get("report_id")
                 else None
             )
@@ -2605,7 +2609,7 @@ def show_history():
                 st.write("")
                 if st.button("Detect date from original file with AI"):
                     with st.spinner("Asking the AI Manager to re-read the report date..."):
-                        original_bytes = data_manager.get_original_report_bytes(
+                        original_bytes = data_service.get_original_report_bytes(
                             original_entry["stored_filename"]
                         )
                         ai_extracted = (
@@ -2629,7 +2633,7 @@ def show_history():
                 if detected_key in st.session_state:
                     st.info(f"AI detected report date: {st.session_state[detected_key]}")
                     if st.button("Use this detected date"):
-                        if data_manager.update_record_date(
+                        if data_service.update_record_date(
                             selected_id, st.session_state[detected_key]
                         ):
                             del st.session_state[detected_key]
@@ -2656,7 +2660,7 @@ def show_history():
     st.divider()
     st.subheader("Original Medical Reports")
 
-    original_reports = data_manager.list_original_reports(current_user())
+    original_reports = data_service.list_original_reports(current_user())
 
     if not original_reports:
         st.caption("Original files you upload will be archived here.")
@@ -2671,7 +2675,7 @@ def show_history():
                 with cols[2]:
                     st.caption(entry.get("filename", ""))
                 with cols[3]:
-                    file_bytes = data_manager.get_original_report_bytes(entry["stored_filename"])
+                    file_bytes = data_service.get_original_report_bytes(entry["stored_filename"])
                     if file_bytes:
                         st.download_button(
                             "Download",
@@ -2711,7 +2715,7 @@ def show_trends():
     )
 
     # Loaded through the Data Manager - never read the JSON file here.
-    all_records = data_manager.load_health_records()
+    all_records = data_service.load_health_records()
     my_records = records_for_current_user(all_records)
 
     # No records yet
@@ -2742,7 +2746,7 @@ def show_trends():
     # Active trend analysis only uses the latest N report dates (see
     # config.LATEST_REPORTS_LIMIT) - Health History still shows every
     # report regardless, since it loads my_records directly, not this.
-    recent_records = data_manager.get_latest_reports(my_records)
+    recent_records = data_service.get_latest_reports(my_records)
 
     # Grouped and classified by logic_manager's own stored evaluation -
     # not recomputed in this file. See build_record_trends().
@@ -2864,10 +2868,10 @@ def show_consultation():
     # Give any record saved before record_id existed one now - this
     # page's automatic-save idempotency check below depends on every
     # record having one (see source_record_id further down).
-    data_manager.backfill_record_ids()
+    data_service.backfill_record_ids()
 
     # Loaded through the Data Manager - never read the JSON file here.
-    all_records = data_manager.load_health_records()
+    all_records = data_service.load_health_records()
     my_records = records_for_current_user(all_records)
 
     if not my_records:
@@ -2879,7 +2883,7 @@ def show_consultation():
     # Consultation preparation only uses the latest N report dates (see
     # config.LATEST_REPORTS_LIMIT) - Health History still shows every
     # report regardless, since it loads my_records directly, not this.
-    recent_records = data_manager.get_latest_reports(my_records)
+    recent_records = data_service.get_latest_reports(my_records)
     trends = build_record_trends(recent_records)
 
     # The AI Manager only ever phrases logic_manager's own already-
@@ -2952,11 +2956,11 @@ def show_consultation():
         # latest record (a refresh, clicking Download above, navigating
         # away and back) never create a duplicate entry; a genuinely
         # new latest record (a new upload) gets its own new entry.
-        existing_entry = data_manager.find_consultation_pdf_by_source(
+        existing_entry = data_service.find_consultation_pdf_by_source(
             current_user(), source_record_id
         )
         if not existing_entry:
-            saved_entry = data_manager.save_consultation_pdf(
+            saved_entry = data_service.save_consultation_pdf(
                 pdf_bytes=pdf_bytes,
                 report_date=report_date,
                 username=current_user(),
@@ -2974,7 +2978,7 @@ def show_consultation():
     st.divider()
     st.subheader("Summary History")
 
-    saved_summaries = data_manager.list_consultation_pdfs(current_user())
+    saved_summaries = data_service.list_consultation_pdfs(current_user())
 
     if not saved_summaries:
         st.caption("Summaries you save will appear here for later download.")
@@ -2988,7 +2992,7 @@ def show_consultation():
                 with cols[1]:
                     st.caption(f"Generated {_format_summary_timestamp(entry.get('generated_at'))}")
                 with cols[2]:
-                    pdf_data = data_manager.get_consultation_pdf_bytes(entry["filename"])
+                    pdf_data = data_service.get_consultation_pdf_bytes(entry["filename"])
                     if pdf_data:
                         st.download_button(
                             "Download",

@@ -168,5 +168,15 @@
     "stored_filename": "e0146461259345bcbf4c3e14f63f6928.png",
     "mime_type": "image/png",
     "content_hash": "4b06f64c55bdde5bce7fe28517864904e849f4eae299f0532eec31bac18572a2"
+  },
+  {
+    "report_id": "408c8ba4fe6443228770305a891b1b4c",
+    "username": "test81",
+    "report_date": "2026-09-22",
+    "upload_date": "2026-11-04",
+    "filename": "mock_report_severe (1).pdf",
+    "stored_filename": "408c8ba4fe6443228770305a891b1b4c.pdf",
+    "mime_type": "application/pdf",
+    "content_hash": "125f0c7edd8c6caadc7ae3e7feed822b2040b646f6adedd56b01097b253977cf"
   }
 ]
