@@ -388,7 +388,7 @@ class RecentChangeRule(Rule):
         )
 
 # ===========================================================================
-# Safety guardrail - forward-compatible free-text filter
+# Safe  ty guardrail - forward-compatible free-text filter
 # ===========================================================================
 
 class SafetyGuardrail:
@@ -425,3 +425,48 @@ class SafetyGuardrail:
 
         return ai_explanation
 
+# ===========================================================================
+# MedicalProfileValidator - standing reference-data validation (own SRP)
+# ===========================================================================
+
+class MedicalProfileValidator:
+    """
+    Validate and normalise a raw medical-profile dict (medications,
+    blood group, allergies, emergency contacts, hereditary illness).
+
+    A separate class from the vital-sign engine because this is
+    user-entered reference data, not a measurement - it gets no
+    thresholds, trend analysis or scoring, only validation. Mirrors the
+    old validate_medical_profile() exactly, including its (cleaned,
+    errors) return and its never-mutate-the-input guarantee.
+    """
+
+    VALID_BLOOD_GROUPS = ["", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+    VALID_ALLERGY_SEVERITIES = ["mild", "moderate", "severe"]
+    VALID_DOSAGE_UNITS = [
+        "", "mg", "mcg", "g", "ml", "L", "IU", "%",
+        "units", "tablet(s)", "drop(s)", "puff(s)", "patch(es)",
+    ]
+    # Mandatory leading "+" and country code, then digits/spaces/dashes only.
+    _PHONE_RE = re.compile(r"^\+[1-9][0-9 \-]{5,18}$")
+
+    def validate(self, profile: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+        errors: List[str] = []
+        cleaned: Dict[str, Any] = {
+            "medications": [],
+            "blood_group": "",
+            "allergies": [],
+            "emergency_contacts": [],
+            "hereditary_illness": {
+                "diabetes": False, "blood_pressure": False,
+                "heart_disease": False, "asthma": False,
+                "other": "", "notes": "",
+            },
+        }
+
+        # --- Blood group: must be one of the known groups (blank = unknown) ---
+        blood_group = str(profile.get("blood_group", "")).strip().upper()
+        if blood_group in self.VALID_BLOOD_GROUPS:
+            cleaned["blood_group"] = blood_group
+        else:
+            errors.append(f"'{blood_group}' is not a recognised blood group.")
