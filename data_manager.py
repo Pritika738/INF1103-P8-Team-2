@@ -46,11 +46,12 @@ from data_layer import (
     MedicalProfileStore,
     OriginalReportArchive,
     RecordRepository,
+    SqliteRecordRepository,
     default_medical_profile,
 )
 
 __all__ = [
-    "DataManager", "RecordRepository", "JsonRecordRepository",
+    "DataManager", "RecordRepository", "JsonRecordRepository", "SqliteRecordRepository",
     "ConsultationPdfArchive", "OriginalReportArchive", "MedicalProfileStore",
 ]
 
@@ -71,7 +72,7 @@ class DataManager:
     def create(cls) -> "DataManager":
         """Build a DataManager that uses the real files configured in config.py."""
         return cls(
-            JsonRecordRepository(),
+            SqliteRecordRepository(),
             ConsultationPdfArchive(),
             OriginalReportArchive(),
             MedicalProfileStore(),

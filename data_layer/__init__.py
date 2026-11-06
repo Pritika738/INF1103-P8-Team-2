@@ -9,10 +9,11 @@ from .json_store import JsonListStore, JsonObjectStore, JsonStore
 from .medical_profile_store import MedicalProfileStore, default_medical_profile
 from .original_report_archive import OriginalReportArchive
 from .repositories import JsonRecordRepository, RecordRepository
+from .sqlite_repository import SqliteRecordRepository
 
 __all__ = [
     "JsonStore", "JsonListStore", "JsonObjectStore",
-    "RecordRepository", "JsonRecordRepository",
+    "RecordRepository", "JsonRecordRepository", "SqliteRecordRepository",
     "ConsultationPdfArchive", "OriginalReportArchive",
     "MedicalProfileStore", "default_medical_profile",
 ]
