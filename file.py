@@ -1,3 +1,5 @@
+import math
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 
@@ -17,11 +19,13 @@ class ExtractedFile:
         self.__mime_type = self._require_text(mime_type, "mime_type")
         self.__is_medical_report = is_medical_report
         self.__classification_reason = classification_reason
-        self.__heart_rate = heart_rate
-        self.__bp_systolic = blood_pressure_systolic
-        self.__bp_diastolic = blood_pressure_diastolic
-        self.__blood_glucose = blood_glucose
-        self.__report_date = report_date          # "YYYY-MM-DD" or None
+        self.__heart_rate = self._validate_metric(heart_rate, "heart_rate")
+        self.__bp_systolic = self._validate_metric(
+            blood_pressure_systolic, "blood_pressure_systolic")
+        self.__bp_diastolic = self._validate_metric(
+            blood_pressure_diastolic, "blood_pressure_diastolic")
+        self.__blood_glucose = self._validate_metric(blood_glucose, "blood_glucose")
+        self.__report_date = self._validate_date(report_date)  # "YYYY-MM-DD" or None
 
     @staticmethod
     def _require_text(value: str, field_name: str) -> str:
@@ -29,6 +33,36 @@ class ExtractedFile:
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{field_name} must be a non-empty string.")
         return value.strip()
+
+    @staticmethod
+    def _validate_date(value: Optional[str]) -> Optional[str]:
+        """Return value if it is a real 'YYYY-MM-DD' date, None if no date given."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("report_date must be a 'YYYY-MM-DD' string or None.")
+        value = value.strip()
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError(f"report_date {value!r} is not a real date.") from None
+        if parsed.strftime("%Y-%m-%d") != value:
+            raise ValueError(f"report_date {value!r} must use the format YYYY-MM-DD.")
+        return value
+
+    @staticmethod
+    def _validate_metric(value: Optional[float], field_name: str) -> Optional[float]:
+        """Return value if it is a real, non-negative number; None if not measured."""
+        if value is None:
+            return None
+        # bool is a subclass of int in Python, but True/False is not a measurement.
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{field_name} must be a number or None.")
+        if not math.isfinite(value):
+            raise ValueError(f"{field_name} must be a finite number.")
+        if value < 0:
+            raise ValueError(f"{field_name} must not be negative.")
+        return value
     
     # ------------------------------------------------------------------
     # Construction from AI output
@@ -53,7 +87,24 @@ class ExtractedFile:
             blood_glucose=ai_result["blood_glucose"],
             report_date=ai_result["report_date"],
         )
-
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ExtractedFile":
+        """Rebuild an ExtractedFile from the dict produced by to_dict()."""
+        if not isinstance(data, dict):
+            raise TypeError("data must be a dict.")
+        metrics = data.get("metrics") or {}
+        return cls(
+            source=data.get("source"),
+            mime_type=data.get("mime_type"),
+            is_medical_report=data.get("is_medical_report", False),
+            classification_reason=data.get("classification_reason", ""),
+            heart_rate=metrics.get("heart_rate"),
+            blood_pressure_systolic=metrics.get("blood_pressure_systolic"),
+            blood_pressure_diastolic=metrics.get("blood_pressure_diastolic"),
+            blood_glucose=metrics.get("blood_glucose"),
+            report_date=data.get("date"),
+        )
     # ------------------------------------------------------------------
     # Read-only access
     # ------------------------------------------------------------------
