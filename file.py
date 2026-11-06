@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 
@@ -21,7 +22,7 @@ class ExtractedFile:
         self.__bp_systolic = blood_pressure_systolic
         self.__bp_diastolic = blood_pressure_diastolic
         self.__blood_glucose = blood_glucose
-        self.__report_date = report_date          # "YYYY-MM-DD" or None
+        self.__report_date = self._validate_date(report_date)  # "YYYY-MM-DD" or None
 
     @staticmethod
     def _require_text(value: str, field_name: str) -> str:
@@ -29,6 +30,22 @@ class ExtractedFile:
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{field_name} must be a non-empty string.")
         return value.strip()
+
+     @staticmethod
+    def _validate_date(value: Optional[str]) -> Optional[str]:
+        """Return value if it is a real 'YYYY-MM-DD' date, None if no date given."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("report_date must be a 'YYYY-MM-DD' string or None.")
+        value = value.strip()
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError(f"report_date {value!r} is not a real date.") from None
+        if parsed.strftime("%Y-%m-%d") != value:
+            raise ValueError(f"report_date {value!r} must use the format YYYY-MM-DD.")
+        return value
     
     # ------------------------------------------------------------------
     # Construction from AI output
