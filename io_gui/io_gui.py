@@ -1,4 +1,4 @@
-﻿import streamlit as st
+import streamlit as st
 import json
 import os
 import re
@@ -1105,14 +1105,11 @@ USERNAME_PATTERN = re.compile(
     r"^[A-Za-z0-9_.-]{3,30}$"
 )
 
-<<<<<<< HEAD
-=======
 # [0-9] rather than \d: Python's \d matches any Unicode decimal digit
 # (e.g. Arabic-indic 0-9), not just ASCII 0-9. "Digits only, reject
 # everything else" should mean ASCII digits specifically.
 PHONE_PATTERN = re.compile(r"^[0-9]{8}$")
 
->>>>>>> 1df36bab30ed372d89e27111983b1df1e244bc52
 PASSWORD_ITERATIONS = 200_000
 
 ALLOWED_FILE_EXTENSIONS = {
@@ -1153,8 +1150,6 @@ def validate_username(username: str) -> str:
     return ""
 
 
-<<<<<<< HEAD
-=======
 def validate_phone(phone: str) -> str:
 
     phone = phone.strip()
@@ -1171,7 +1166,6 @@ def validate_phone(phone: str) -> str:
     return ""
 
 
->>>>>>> 1df36bab30ed372d89e27111983b1df1e244bc52
 def validate_password(password: str) -> str:
 
     if not password:
@@ -1268,10 +1262,7 @@ def save_accounts(accounts: dict) -> None:
 
 def create_temporary_account(
     username: str,
-<<<<<<< HEAD
-=======
     phone: str,
->>>>>>> 1df36bab30ed372d89e27111983b1df1e244bc52
     password: str
 ) -> tuple[bool, str]:
     """
@@ -1283,10 +1274,7 @@ def create_temporary_account(
     """
 
     username = username.strip()
-<<<<<<< HEAD
-=======
     phone = phone.strip()
->>>>>>> 1df36bab30ed372d89e27111983b1df1e244bc52
 
     username_key = username.lower()
 
@@ -1296,12 +1284,6 @@ def create_temporary_account(
     if username_key in accounts:
         return (False, "That username is already taken.")
 
-<<<<<<< HEAD
-        return (
-            False,
-            "That username is already taken."
-        )
-=======
     # Check duplicate phone number
     for account in accounts.values():
         if account.get("phone", "") == phone:
@@ -1309,7 +1291,6 @@ def create_temporary_account(
                 False,
                 "An account already exists with this phone number."
             )
->>>>>>> 1df36bab30ed372d89e27111983b1df1e244bc52
 
     # Create random salt for password hashing
     salt = secrets.token_hex(16)
@@ -1317,10 +1298,7 @@ def create_temporary_account(
     # Store HASH, not actual password
     accounts[username_key] = {
         "username": username,
-<<<<<<< HEAD
-=======
         "phone": phone,
->>>>>>> 1df36bab30ed372d89e27111983b1df1e244bc52
         "salt": salt,
         "password_hash": hash_password(password, salt)
     }
@@ -1353,45 +1331,6 @@ def authenticate_temporary_account(
         account["password_hash"]
     )
 
-<<<<<<< HEAD
-# ---------------------------------------------------------
-# PIN LOGIN PRIMITIVES
-# NOTE: the Commit 4 plan says these already exist; they were not in
-# the file provided, so minimal versions are included here. Delete this
-# block if your own validate_pin / authenticate_with_pin /
-# PIN_MAX_ATTEMPTS already exist elsewhere. Assumes an account stores
-# "pin_salt" and "pin_hash" (hash_password() applied to the PIN).
-# ---------------------------------------------------------
-
-PIN_MAX_ATTEMPTS = 3
-PIN_PATTERN = re.compile(r"^[0-9]{4}$")
-
-
-def validate_pin(pin: str) -> str:
-
-    if not pin:
-        return "Please enter your PIN."
-
-    if not PIN_PATTERN.fullmatch(pin):
-        return "PIN must be exactly 4 digits."
-
-    return ""
-
-
-def authenticate_with_pin(username: str, pin: str) -> bool:
-
-    account = load_accounts().get(username.strip().lower())
-
-    if (
-        account is None
-        or "pin_hash" not in account
-        or "pin_salt" not in account
-    ):
-        return False
-
-    entered_hash = hash_password(pin, account["pin_salt"])
-
-=======
 # =========================================================
 # QUICK-LOGIN PIN
 # =========================================================
@@ -1505,7 +1444,6 @@ def authenticate_with_pin(username: str, pin: str) -> bool:
         return False
 
     entered_hash = hash_pin(pin, account["pin_salt"])
->>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
     return hmac.compare_digest(entered_hash, account["pin_hash"])
 
 def validate_uploaded_report(
@@ -1676,33 +1614,6 @@ def show_login():
 
                 go("register")
 
-<<<<<<< HEAD
-            if st.button(
-                "Quick login with PIN",
-                use_container_width=True,
-                key="goto_pin_login",
-            ):
-                go("pin_login")
-
-def show_pin_login():
-
-    left, mid, right = st.columns([1, 1.4, 1])
-
-    with mid:
-
-        st.markdown(
-            "<div class='vt-hero' style='text-align:center;margin-top:2.5rem;'>"
-            "<div class='vt-bob' style='font-size:3rem;'>🔑</div>"
-            "<h1 style='margin:0;'>Quick login with PIN</h1>"
-            "<p style='color:var(--text-muted);'>"
-            "Enter your username and 4-digit PIN."
-            "</p></div>",
-            unsafe_allow_html=True,
-        )
-
-        with st.container(border=True):
-
-=======
 # --- Quick login with PIN -------------------------------------
         # A convenience shortcut for users who have already set a
         # 4-digit PIN (see show_settings()). Requires the username too,
@@ -1717,30 +1628,17 @@ def show_pin_login():
                 "PIN for faster sign-in."
             )
 
->>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
             attempts = st.session_state.get("pin_attempts", 0)
 
             if attempts >= PIN_MAX_ATTEMPTS:
 
                 st.error(
                     "Too many incorrect PIN attempts. Please sign in "
-<<<<<<< HEAD
-                    "with your password instead."
-=======
                     "with your password above."
->>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
                 )
 
             else:
 
-<<<<<<< HEAD
-                pin_username = st.text_input("Username", key="pin_login_username")
-                pin_value = st.text_input(
-                    "4-digit PIN", type="password", max_chars=4, key="pin_login_pin"
-                )
-
-                if st.button("Log In with PIN", type="primary", use_container_width=True):
-=======
                 pin_username = st.text_input(
                     "Username",
                     key="pin_login_username",
@@ -1757,31 +1655,10 @@ def show_pin_login():
                     "Log In with PIN",
                     use_container_width=True,
                 ):
->>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
 
                     pin_error = validate_pin(pin_value)
 
                     if not pin_username.strip():
-<<<<<<< HEAD
-                        st.error("Please enter your username.")
-
-                    elif pin_error:
-                        st.error(pin_error)
-
-                    elif authenticate_with_pin(pin_username, pin_value):
-                        accounts = load_accounts()
-                        account = accounts[pin_username.strip().lower()]
-                        st.session_state.username = account["username"]
-                        st.session_state.pop("pin_attempts", None)
-                        go("dashboard")
-
-                    else:
-                        st.session_state["pin_attempts"] = attempts + 1
-                        remaining = PIN_MAX_ATTEMPTS - st.session_state["pin_attempts"]
-                        if remaining > 0:
-                            st.error(
-                                f"Incorrect username or PIN. {remaining} attempt(s) remaining."
-=======
 
                         st.error("Please enter your username.")
 
@@ -1808,24 +1685,13 @@ def show_pin_login():
                             st.error(
                                 "Incorrect username or PIN. "
                                 f"{remaining} attempt(s) remaining."
->>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
                             )
                         else:
                             st.error(
                                 "Too many incorrect PIN attempts. Please "
-<<<<<<< HEAD
-                                "sign in with your password instead."
-                            )
-
-            if st.button("Back to Login", use_container_width=True):
-                st.session_state.pop("pin_attempts", None)
-                go("login")
-
-=======
                                 "sign in with your password above."
                             )
 
->>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
 def show_register():
 
     left, mid, right = st.columns([1, 1.4, 1])
@@ -1856,15 +1722,12 @@ def show_register():
                 key="register_username"
             )
 
-<<<<<<< HEAD
-=======
             phone = st.text_input(
                 "Phone number",
                 placeholder="81234567",
                 key="register_phone"
             )
 
->>>>>>> 1df36bab30ed372d89e27111983b1df1e244bc52
             password = st.text_input(
                 "Password",
                 type="password",
@@ -1894,14 +1757,11 @@ def show_register():
                     username
                 )
 
-<<<<<<< HEAD
-=======
                 # Check phone number
                 phone_error = validate_phone(
                     phone
                 )
 
->>>>>>> 1df36bab30ed372d89e27111983b1df1e244bc52
                 # Check password strength
                 password_error = validate_password(
                     password
@@ -1913,15 +1773,12 @@ def show_register():
                         username_error
                     )
 
-<<<<<<< HEAD
-=======
                 elif phone_error:
 
                     st.error(
                         phone_error
                     )
 
->>>>>>> 1df36bab30ed372d89e27111983b1df1e244bc52
                 elif password_error:
 
                     st.error(
@@ -1939,10 +1796,7 @@ def show_register():
                     created, message = (
                         create_temporary_account(
                             username,
-<<<<<<< HEAD
-=======
                             phone,
->>>>>>> 1df36bab30ed372d89e27111983b1df1e244bc52
                             password
                         )
                     )
@@ -3319,11 +3173,7 @@ def show_consultation():
     # Give any record saved before record_id existed one now - this
     # page's automatic-save idempotency check below depends on every
     # record having one (see source_record_id further down).
-<<<<<<< HEAD
-    data_manager.backfill_record_ids()
-=======
     data_service.backfill_record_ids()
->>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
 
     # Loaded through the Data Manager - never read the JSON file here.
     all_records = data_service.load_health_records()
@@ -3411,19 +3261,11 @@ def show_consultation():
         # latest record (a refresh, clicking Download above, navigating
         # away and back) never create a duplicate entry; a genuinely
         # new latest record (a new upload) gets its own new entry.
-<<<<<<< HEAD
-        existing_entry = data_manager.find_consultation_pdf_by_source(
-            current_user(), source_record_id
-        )
-        if not existing_entry:
-            saved_entry = data_manager.save_consultation_pdf(
-=======
         existing_entry = data_service.find_consultation_pdf_by_source(
             current_user(), source_record_id
         )
         if not existing_entry:
             saved_entry = data_service.save_consultation_pdf(
->>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
                 pdf_bytes=pdf_bytes,
                 report_date=report_date,
                 username=current_user(),
