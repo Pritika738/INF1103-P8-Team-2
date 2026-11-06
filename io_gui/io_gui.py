@@ -1,4 +1,4 @@
-﻿import streamlit as st
+import streamlit as st
 import json
 import os
 import re
@@ -8,7 +8,7 @@ import hashlib
 import hmac
 import secrets
 from pathlib import Path
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import pandas as pd
 import altair as alt
@@ -930,6 +930,101 @@ def build_readings_table_rows(records):
         })
     return rows
 
+# ---------------------------------------------------------------------------
+# Self-logged vitals ("My Vitals" page)
+# ---------------------------------------------------------------------------
+# Readings the user measured at home and typed in by hand. They are
+# stored in data/manual_vitals.json (NOT health_records.json), so they
+# never appear in the report-based History, Trends or Consultation pages.
+
+vitals_validator = logic_manager.ManualVitalsValidator()
+vitals_logic = logic_manager.LogicManager.default()
+
+VITAL_COLUMNS = [
+    ("blood_pressure_systolic", "Systolic BP", "mmHg"),
+    ("blood_pressure_diastolic", "Diastolic BP", "mmHg"),
+    ("heart_rate", "Heart Rate", "bpm"),
+    ("blood_glucose", "Blood Glucose", "mmol/L"),
+]
+
+VITALS_PERIODS = {
+    "Last 7 days": 7,
+    "Last 30 days": 30,
+    "Last 90 days": 90,
+    "All time": None,
+}
+
+
+def vitals_in_period(entries, days):
+    """Keep only entries measured within the last ⁠ days ⁠ days (None = all)."""
+    if days is None:
+        return list(entries)
+    cutoff = (date.today() - timedelta(days=days - 1)).isoformat()
+    return [e for e in entries if (e.get("date") or "") >= cutoff]
+
+
+def build_vitals_table_rows(entries):
+    """Display rows for the self-logged history table, newest first."""
+    newest_first = sorted(
+        entries, key=lambda e: (e.get("date") or "", e.get("time") or ""), reverse=True
+    )
+    rows = []
+    for entry in newest_first:
+        metrics = entry.get("metrics", {})
+        row = {
+            "Measured On": _format_report_date(entry.get("date")),
+            "Time": entry.get("time") or "—",
+        }
+        for key, label, unit in VITAL_COLUMNS:
+            row[label] = _format_measurement(metrics.get(key), unit)
+        row["Outcome"] = entry.get("decision", "")
+        row["Note"] = entry.get("note", "")
+        rows.append(row)
+    return rows
+
+
+def build_vitals_chart(entries, members, title, unit):
+    """
+    One Altair line chart for one group of self-logged vitals (e.g.
+    systolic + diastolic together). Uses date AND time on the x-axis, so
+    a morning and an evening reading on the same day are two points.
+    Returns None if there is nothing to plot.
+    """
+    rows = []
+    for entry in entries:
+        if not entry.get("date"):
+            continue
+        when = entry["date"] + " " + (entry.get("time") or "00:00")
+        for key, label in members:
+            value = entry.get("metrics", {}).get(key)
+            if value is not None:
+                rows.append({"when": when, "measurement": label, "value": value})
+
+    if not rows:
+        return None
+
+    df = pd.DataFrame(rows)
+    df["when"] = pd.to_datetime(df["when"], errors="coerce")
+    df = df.dropna(subset=["when"])
+    if df.empty:
+        return None
+
+    return (
+        alt.Chart(df)
+        .mark_line(point=True)
+        .encode(
+            x=alt.X("when:T", title="Measured", axis=alt.Axis(format="%d %b", labelAngle=0)),
+            y=alt.Y("value:Q", title=f"{title} ({unit})", scale=alt.Scale(zero=False)),
+            color=alt.Color("measurement:N", legend=alt.Legend(title=None, orient="top")),
+            tooltip=[
+                alt.Tooltip("when:T", title="Measured", format="%d %b %Y, %H:%M"),
+                alt.Tooltip("measurement:N", title="Measurement"),
+                alt.Tooltip("value:Q", title=unit),
+            ],
+        )
+        .properties(height=260)
+        .interactive()
+    )
 
 def severity_badge(severity):
     s = SEVERITY_STYLE.get(severity, SEVERITY_STYLE["info"])
@@ -970,24 +1065,26 @@ def sidebar_nav():
                 unsafe_allow_html=True,
             )
         st.markdown("---")
-        if st.button("Dashboard", use_container_width=True):
+        if st.button("Dashboard", width="stretch"):
             go("dashboard")
-        if st.button("Add Report", use_container_width=True):
+        if st.button("Add Report", width="stretch"):
             go("upload")
-        if st.button("Health History", use_container_width=True):
+        if st.button("Health History", width="stretch"):
             go("history")
-        if st.button("Health Trends", use_container_width=True):
+        if st.button("Health Trends", width="stretch"):
             go("trends")
-        if st.button("Consultation", use_container_width=True):
+        if st.button("My Vitals", width="stretch"):
+            go("vitals")
+        if st.button("Consultation", width="stretch"):
             go("consultation")
-        if st.button("Medical Profile", use_container_width=True):
+        if st.button("Medical Profile", width="stretch"):
             go("profile")
-        if st.button("Settings", use_container_width=True):      # ← ADD THIS
+        if st.button("Settings", width="stretch"):      # ← ADD THIS
             go("settings")                                       # ← ADD THIS
         st.markdown("---")
         if st.button(
             "Log Out",
-            use_container_width=True
+            width="stretch"
         ):
 
             for key in list(
@@ -1007,9 +1104,10 @@ USERNAME_PATTERN = re.compile(
     r"^[A-Za-z0-9_.-]{3,30}$"
 )
 
-EMAIL_PATTERN = re.compile(
-    r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
-)
+# [0-9] rather than \d: Python's \d matches any Unicode decimal digit
+# (e.g. Arabic-indic 0-9), not just ASCII 0-9. "Digits only, reject
+# everything else" should mean ASCII digits specifically.
+PHONE_PATTERN = re.compile(r"^[0-9]{8}$")
 
 PASSWORD_ITERATIONS = 200_000
 
@@ -1051,15 +1149,18 @@ def validate_username(username: str) -> str:
     return ""
 
 
-def validate_email(email: str) -> str:
+def validate_phone(phone: str) -> str:
 
-    email = email.strip()
+    phone = phone.strip()
 
-    if not email:
-        return "Please enter an email address."
+    if not phone:
+        return "Please enter a phone number."
 
-    if not EMAIL_PATTERN.fullmatch(email):
-        return "Please enter a valid email address."
+    if not PHONE_PATTERN.fullmatch(phone):
+        return (
+            "Phone number must be exactly 8 digits, with no letters, "
+            "spaces or special characters."
+        )
 
     return ""
 
@@ -1128,7 +1229,7 @@ def save_accounts(accounts: dict) -> None:
 
 def create_temporary_account(
     username: str,
-    email: str,
+    phone: str,
     password: str
 ) -> tuple[bool, str]:
     """
@@ -1137,7 +1238,7 @@ def create_temporary_account(
     """
 
     username = username.strip()
-    email = email.strip().lower()
+    phone = phone.strip()
 
     username_key = username.lower()
 
@@ -1145,24 +1246,14 @@ def create_temporary_account(
 
     # Check duplicate username
     if username_key in accounts:
+        return (False, "That username is already taken.")
 
-        return (
-            False,
-            "That username is already taken."
-        )
-
-    # Check duplicate email
+    # Check duplicate phone number
     for account in accounts.values():
-
-        if account.get(
-            "email",
-            ""
-        ).lower() == email:
-
+        if account.get("phone", "") == phone:
             return (
                 False,
-                "An account already exists "
-                "with this email address."
+                "An account already exists with this phone number."
             )
 
     # Create random salt for password hashing
@@ -1171,22 +1262,14 @@ def create_temporary_account(
     # Store HASH, not actual password
     accounts[username_key] = {
         "username": username,
-        "email": email,
+        "phone": phone,
         "salt": salt,
-        "password_hash": hash_password(
-            password,
-            salt
-        )
+        "password_hash": hash_password(password, salt)
     }
 
-    save_accounts(
-        accounts
-    )
+    save_accounts(accounts)
 
-    return (
-        True,
-        "Account created successfully."
-    )
+    return (True, "Account created successfully.")
 
 def authenticate_temporary_account(
     username: str,
@@ -1446,7 +1529,7 @@ def show_login():
             if st.button(
                 "Log In",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             ):
 
                 if not username.strip():
@@ -1482,10 +1565,6 @@ def show_login():
                         "username"
                     ]
 
-                    st.session_state.email = account[
-                        "email"
-                    ]
-
                     go("dashboard")
 
             st.caption(
@@ -1494,7 +1573,7 @@ def show_login():
 
             if st.button(
                 "Create Account",
-                use_container_width=True
+                width="stretch"
             ):
 
                 go("register")
@@ -1538,7 +1617,7 @@ def show_login():
 
                 if st.button(
                     "Log In with PIN",
-                    use_container_width=True,
+                    width="stretch",
                 ):
 
                     pin_error = validate_pin(pin_value)
@@ -1557,7 +1636,6 @@ def show_login():
                         account = accounts[pin_username.strip().lower()]
 
                         st.session_state.username = account["username"]
-                        st.session_state.email = account["email"]
                         st.session_state.pop("pin_attempts", None)
 
                         go("dashboard")
@@ -1608,10 +1686,10 @@ def show_register():
                 key="register_username"
             )
 
-            email = st.text_input(
-                "Email",
-                placeholder="name@example.com",
-                key="register_email"
+            phone = st.text_input(
+                "Phone number",
+                placeholder="81234567",
+                key="register_phone"
             )
 
             password = st.text_input(
@@ -1635,7 +1713,7 @@ def show_register():
             if st.button(
                 "Create Account",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             ):
 
                 # Check username
@@ -1643,9 +1721,9 @@ def show_register():
                     username
                 )
 
-                # Check email
-                email_error = validate_email(
-                    email
+                # Check phone number
+                phone_error = validate_phone(
+                    phone
                 )
 
                 # Check password strength
@@ -1659,10 +1737,10 @@ def show_register():
                         username_error
                     )
 
-                elif email_error:
+                elif phone_error:
 
                     st.error(
-                        email_error
+                        phone_error
                     )
 
                 elif password_error:
@@ -1682,7 +1760,7 @@ def show_register():
                     created, message = (
                         create_temporary_account(
                             username,
-                            email,
+                            phone,
                             password
                         )
                     )
@@ -1706,7 +1784,7 @@ def show_register():
 
             if st.button(
                 "Back to Login",
-                use_container_width=True
+                width="stretch"
             ):
 
                 go("login")
@@ -1905,7 +1983,7 @@ def show_profile():
         notes = st.text_input("Notes (e.g. which relative)", value=hereditary.get("notes", ""))
 
     st.write("")
-    if st.button("Save medical profile", type="primary", use_container_width=True):
+    if st.button("Save medical profile", type="primary", width="stretch"):
         raw_profile = {
             "blood_group": "" if blood_group_choice == "Not set" else blood_group_choice,
             "medications": medications,
@@ -1977,7 +2055,7 @@ def show_settings():
             if st.button(
                 "Change PIN" if has_pin else "Set PIN",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
             ):
                 pin_error = validate_pin(new_pin)
                 if pin_error:
@@ -1992,7 +2070,7 @@ def show_settings():
 
         with cols[1]:
             if has_pin:
-                if st.button("Remove PIN", use_container_width=True):
+                if st.button("Remove PIN", width="stretch"):
                     if remove_user_pin(username):
                         st.success("Your quick-login PIN has been removed.")
                         st.rerun()
@@ -2309,7 +2387,7 @@ def show_upload():
         if st.button(
             "Analyze with AI",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         ):
 
             if not uploaded_files:
@@ -2504,7 +2582,7 @@ def show_history():
     decisions = ["All"] + sorted({r["Outcome"] for r in table_rows if r["Outcome"]})
     chosen = st.selectbox("Filter by outcome", decisions)
     view = table_rows if chosen == "All" else [r for r in table_rows if r["Outcome"] == chosen]
-    st.dataframe(view, use_container_width=True, hide_index=True)
+    st.dataframe(view, width="stretch", hide_index=True)
 
     csv_lines = ["Report Date,Outcome,Heart Rate,Systolic BP,Diastolic BP,Blood Glucose"]
     for r in view:
@@ -2725,7 +2803,7 @@ def show_trends():
 
     combined_chart = build_multi_axis_trend_chart(recent_records)
     if combined_chart is not None:
-        st.altair_chart(combined_chart, use_container_width=True)
+        st.altair_chart(combined_chart, width="stretch")
         st.caption(
             "Blood pressure, heart rate, and blood glucose each use their "
             "own scale (right), so they are never compared on one "
@@ -2738,7 +2816,7 @@ def show_trends():
     st.subheader("Measurement table")
     st.dataframe(
         build_readings_table_rows(recent_records),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -2824,6 +2902,233 @@ def show_trends():
             )
 
             st.caption(t["note"])
+
+def show_vitals():
+    hero(
+        "My Vitals",
+        "Log readings you measure yourself - e.g. your daily blood pressure.",
+    )
+    st.caption(
+        "Self-logged readings are kept separately from your medical reports. "
+        "They do not appear in Health History, Health Trends or the "
+        "Consultation summary, which only use uploaded reports."
+    )
+
+    username = current_user()
+    tab_log, tab_history, tab_trends = st.tabs(
+        ["Log a reading", "Vitals history", "Vitals trends"]
+    )
+
+    with tab_log:
+        show_vitals_log_form(username)
+
+    # Loaded AFTER the form, so a reading saved just now shows up below.
+    entries = data_service.list_manual_vitals(username)
+
+    with tab_history:
+        show_vitals_history(username, entries)
+
+    with tab_trends:
+        show_vitals_trends(entries)
+
+
+def show_vitals_log_form(username):
+    """The entry form. Blank fields are simply not recorded, so a user
+    can log only blood pressure, only glucose, or anything in between."""
+    with st.form("log_vitals_form", clear_on_submit=True):
+        st.subheader("New reading")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            measured_date = st.date_input(
+                "Date measured", value=date.today(), max_value=date.today(),
+                format="DD/MM/YYYY",
+            )
+        with c2:
+            measured_time = st.time_input("Time measured", value=datetime.now().time())
+
+        st.markdown("*Blood pressure*")
+        b1, b2 = st.columns(2)
+        with b1:
+            systolic = st.number_input("Systolic (top number, mmHg)",
+                                       min_value=0, step=1, value=None)
+        with b2:
+            diastolic = st.number_input("Diastolic (bottom number, mmHg)",
+                                        min_value=0, step=1, value=None)
+
+        o1, o2 = st.columns(2)
+        with o1:
+            heart_rate = st.number_input("Heart rate (bpm)", min_value=0, step=1, value=None)
+        with o2:
+            glucose = st.number_input("Blood glucose (mmol/L)", min_value=0.0,
+                                      step=0.1, format="%.1f", value=None)
+
+        note = st.text_input("Notes (optional)",
+                             placeholder="e.g. after morning walk, before breakfast",
+                             max_chars=logic_manager.ManualVitalsValidator.MAX_NOTE_LENGTH)
+
+        submitted = st.form_submit_button("Save reading", type="primary")
+
+    if not submitted:
+        return
+
+    cleaned, errors = vitals_validator.validate({
+        "date": measured_date.isoformat() if measured_date else "",
+        "time": measured_time.strftime("%H:%M") if measured_time else "",
+        "metrics": {
+            "blood_pressure_systolic": systolic,
+            "blood_pressure_diastolic": diastolic,
+            "heart_rate": heart_rate,
+            "blood_glucose": glucose,
+        },
+        "note": note,
+    })
+
+    if errors:
+        for message in errors:
+            st.error(message)
+        return
+
+    # Compare only against this user's EARLIER self-logged readings
+    # (by when they were measured) - never against medical reports.
+    measured_at = (cleaned["date"], cleaned["time"])
+    previous = [
+        e for e in data_service.list_manual_vitals(username)
+        if (e.get("date") or "", e.get("time") or "") <= measured_at
+    ]
+    result = vitals_logic.process_manual_reading(cleaned["metrics"], previous)
+
+    entry = dict(cleaned)
+    entry.update({
+        "username": username,
+        "source": "manual",
+        "decision": result["decision"],
+        "urgent_findings": result["urgent_findings"],
+        "flagged_trends": result["flagged_trends"],
+        "recent_changes": result["recent_changes"],
+        "requires_doctor_review": result["requires_doctor_review"],
+        "recommended_action": result["recommended_action"],
+        "summary": result["summary"],
+    })
+
+    if data_service.save_manual_vital(entry) is None:
+        st.error("Could not save this reading. Please try again.")
+        return
+
+    severity = DECISION_SEVERITY.get(result["decision"], "info")
+    with st.container(border=True):
+        st.markdown("*Reading saved* &nbsp; " + severity_badge(severity),
+                    unsafe_allow_html=True)
+        st.write(result["summary"])
+        if result["requires_doctor_review"]:
+            st.warning(result["recommended_action"])
+        for change in result["recent_changes"]:
+            st.caption(change["feedback"])
+
+
+def show_vitals_history(username, entries):
+    if not entries:
+        st.info("No self-logged readings yet. Use the 'Log a reading' tab to add one.")
+        return
+
+    rows = build_vitals_table_rows(entries)
+    outcomes = ["All"] + sorted({r["Outcome"] for r in rows if r["Outcome"]})
+    chosen = st.selectbox("Filter by outcome", outcomes, key="vitals_outcome_filter")
+    view = rows if chosen == "All" else [r for r in rows if r["Outcome"] == chosen]
+    st.dataframe(view, width="stretch", hide_index=True)
+
+    st.download_button(
+        "Download my vitals (CSV)",
+        data=pd.DataFrame(view).to_csv(index=False).encode("utf-8"),
+        file_name="my_vitals.csv",
+        mime="text/csv",
+        key="vitals_csv",
+    )
+
+    with st.expander("Delete a reading"):
+        st.caption("Logged something by mistake? Remove it here. This cannot be undone.")
+        newest_first = list(reversed(entries))
+        options = {
+            e["record_id"]: (
+                f"{_format_report_date(e.get('date'))} {e.get('time') or ''} - "
+                + ", ".join(
+                    f"{label} {_format_measurement(e['metrics'].get(key), unit)}"
+                    for key, label, unit in VITAL_COLUMNS
+                    if e.get("metrics", {}).get(key) is not None
+                )
+            )
+            for e in newest_first if e.get("record_id")
+        }
+        selected = st.selectbox("Reading", list(options.keys()),
+                                format_func=lambda rid: options[rid],
+                                key="vitals_delete_choice")
+        if st.button("Delete reading", key="vitals_delete_btn"):
+            if data_service.delete_manual_vital(username, selected):
+                st.success("Reading deleted.")
+                st.rerun()
+            else:
+                st.error("Could not delete this reading. Please try again.")
+
+def show_vitals_trends(entries):
+    if not entries:
+        st.info("Log a few readings to see your trends here.")
+        return
+
+    period_label = st.radio("Period", list(VITALS_PERIODS.keys()),
+                            horizontal=True, index=1, key="vitals_period")
+    in_period = vitals_in_period(entries, VITALS_PERIODS[period_label])
+
+    if not in_period:
+        st.info("No readings in this period - try a longer one.")
+        return
+
+    st.caption(f"{len(in_period)} reading(s) in this period.")
+
+    chart_groups = [
+        ("Blood Pressure", "mmHg", [("blood_pressure_systolic", "Systolic"),
+                                     ("blood_pressure_diastolic", "Diastolic")]),
+        ("Heart Rate", "bpm", [("heart_rate", "Heart Rate")]),
+        ("Blood Glucose", "mmol/L", [("blood_glucose", "Blood Glucose")]),
+    ]
+    # Reuses the same trend builder as the report pages - it reads each
+    # entry's stored decision/recent_changes, nothing is recomputed here.
+    trends_by_label = {t["metric"]: t for t in build_record_trends(in_period)}
+
+    for title, unit, members in chart_groups:
+        member_trends = [
+            trends_by_label[logic_manager.METRIC_LABELS[key]]
+            for key, _ in members
+            if logic_manager.METRIC_LABELS[key] in trends_by_label
+        ]
+        if not member_trends:
+            continue
+
+        with st.container(border=True):
+            st.markdown(f"### {title}")
+
+            stat_cols = st.columns(len(member_trends))
+            for col, t in zip(stat_cols, member_trends):
+                with col:
+                    values = t["values"]
+                    average = sum(values) / len(values)
+                    st.metric(
+                        t["metric"],
+                        _format_measurement(t["latest"], unit),
+                        delta=(round(values[-1] - values[-2], 1)
+                               if len(values) >= 2 else None),
+                        delta_color="inverse",  # for these metrics, lower is better
+                    )
+                    st.caption(
+                        f"Avg {average:.1f} · Min {min(values):g} · "
+                        f"Max {max(values):g} · {len(values)} reading(s)"
+                    )
+                    st.markdown(severity_badge(t["severity"]), unsafe_allow_html=True)
+
+            chart = build_vitals_chart(in_period, members, title, unit)
+            if chart is not None and max(len(t["values"]) for t in member_trends) >= 2:
+                st.altair_chart(chart, width="stretch")
+            else:
+                st.caption("Add another reading to see a trend line.")
 
 def show_consultation():
     who = display_name() or "you"
@@ -3063,14 +3368,14 @@ def build_pdf(who, report):
 
 inject_css()
 
-if st.session_state.page in ("login", "register"):
+if st.session_state.page in ("login", "register", "pin_login"):
 
     # Create the sidebar from the beginning so Streamlit
     # remembers its initial expanded state.
     with st.sidebar:
         st.markdown("")
 
-    # Hide the sidebar while the user is on Login/Register.
+    # Hide the sidebar while the user is on Login/Register/PIN login.
     st.markdown(
         """
         <style>
@@ -3088,6 +3393,8 @@ if st.session_state.page in ("login", "register"):
 
     if st.session_state.page == "login":
         show_login()
+    elif st.session_state.page == "pin_login":
+        show_pin_login()
     else:
         show_register()
 
@@ -3106,6 +3413,9 @@ else:
 
     elif st.session_state.page == "trends":
         show_trends()
+
+    elif st.session_state.page == "vitals":
+        show_vitals()
 
     elif st.session_state.page == "consultation":
         show_consultation()
