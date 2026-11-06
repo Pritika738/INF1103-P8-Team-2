@@ -41,6 +41,12 @@ ORIGINAL_REPORTS_DIR = os.path.join(DATA_DIR, "original_reports")
 ORIGINAL_REPORTS_FILE = os.path.join(DATA_DIR, "original_reports.json")
 MEDICAL_PROFILES_FILE = os.path.join(DATA_DIR, "medical_profiles.json")
 
+# Vitals the user measured themselves at home (e.g. a daily blood
+# pressure reading) and typed in by hand. Kept in their OWN file, apart
+# from health_records.json, so self-logged readings never mix with the
+# history, trends or consultation summary built from medical reports.
+MANUAL_VITALS_FILE = os.path.join(DATA_DIR, "manual_vitals.json")
+
 # How many report dates are used for active trend analysis and
 # consultation preparation - older reports stay visible in full in
 # Health History, just excluded from these two calculations.

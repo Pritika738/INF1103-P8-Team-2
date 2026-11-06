@@ -556,6 +556,102 @@ class MedicalProfileValidator:
         return cleaned, errors
 
 # ===========================================================================
+# ManualVitalsValidator - checks vitals the user typed in by hand
+# ===========================================================================
+
+class ManualVitalsValidator:
+    """
+    Validate one self-logged vitals entry (e.g. a home blood-pressure
+    reading) before it is saved. These are plausibility checks to catch
+    typing mistakes (e.g. 1200 instead of 120) - NOT clinical judgements;
+    those are still made by the normal Rule objects afterwards.
+
+    validate() returns (cleaned, errors) and never mutates its input,
+    the same contract as MedicalProfileValidator.
+    """
+
+    # key -> (label, lowest plausible, highest plausible)
+    PLAUSIBLE_RANGES = {
+        "blood_pressure_systolic": ("Systolic blood pressure", 50, 300),
+        "blood_pressure_diastolic": ("Diastolic blood pressure", 30, 200),
+        "heart_rate": ("Heart rate", 20, 250),
+        "blood_glucose": ("Blood glucose", 1.0, 40.0),
+    }
+    MAX_NOTE_LENGTH = 200
+
+    def validate(self, entry: Dict[str, Any],
+                 today: Optional[str] = None) -> Tuple[Dict[str, Any], List[str]]:
+        """
+        ⁠ entry ⁠ shape: {"date": "YYYY-MM-DD", "time": "HH:MM" or "",
+        "metrics": {metric_key: number or None, ...}, "note": str}.
+        ⁠ today ⁠ ("YYYY-MM-DD") can be passed in by tests; defaults to the
+        real current date.
+        """
+        errors: List[str] = []
+        today = today or datetime.now().date().isoformat()
+
+        # --- Date: required, valid, and not in the future ---
+        measured_date = str(entry.get("date") or "").strip()
+        try:
+            datetime.strptime(measured_date, "%Y-%m-%d")
+        except ValueError:
+            errors.append("Please enter a valid measurement date.")
+            measured_date = ""
+        if measured_date and measured_date > today:
+            errors.append("The measurement date cannot be in the future.")
+
+        # --- Time: optional, but must be HH:MM if given ---
+        measured_time = str(entry.get("time") or "").strip()
+        if measured_time:
+            try:
+                datetime.strptime(measured_time, "%H:%M")
+            except ValueError:
+                errors.append("Time must be in HH:MM format.")
+                measured_time = ""
+
+        # --- Each metric: blank is fine, otherwise a number in range ---
+        raw_metrics = entry.get("metrics") or {}
+        metrics: Dict[str, Optional[float]] = {}
+        for key, (label, low, high) in self.PLAUSIBLE_RANGES.items():
+            raw = raw_metrics.get(key)
+            if raw is None or str(raw).strip() == "":
+                metrics[key] = None
+                continue
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                errors.append(f"{label} must be a number.")
+                metrics[key] = None
+                continue
+            if not low <= value <= high:
+                errors.append(f"{label} of {value:g} looks unlikely - "
+                              f"please check it (expected {low}-{high}).")
+            metrics[key] = int(value) if value.is_integer() else round(value, 1)
+
+        # --- Blood pressure is only meaningful as a pair ---
+        systolic = metrics["blood_pressure_systolic"]
+        diastolic = metrics["blood_pressure_diastolic"]
+        if (systolic is None) != (diastolic is None):
+            errors.append("Please enter both systolic and diastolic blood pressure.")
+        elif systolic is not None and systolic <= diastolic:
+            errors.append("Systolic (top number) must be higher than diastolic (bottom number).")
+
+        if all(v is None for v in metrics.values()):
+            errors.append("Please enter at least one measurement.")
+
+        note = str(entry.get("note") or "").strip()
+        if len(note) > self.MAX_NOTE_LENGTH:
+            errors.append(f"Notes must be {self.MAX_NOTE_LENGTH} characters or fewer.")
+
+        cleaned = {
+            "date": measured_date,
+            "time": measured_time,
+            "metrics": metrics,
+            "note": note,
+        }
+        return cleaned, errors
+
+# ===========================================================================
 # The engine - LogicManager (replaces process_ai_record)
 # ===========================================================================
 
@@ -632,23 +728,34 @@ class LogicManager:
         return report_date
 
     @staticmethod
-    def _history_values(historical_records: List[Dict[str, Any]], metric: str) -> List[Optional[float]]:
+    def _history_values(historical_records: List[Dict[str, Any]], metric: str,
+                        skip_missing: bool = False) -> List[Optional[float]]:
         """
         This metric's past readings, oldest to newest, reading from
         either a flat CLI record or an AI-pipeline record nested under
         'metrics' - mirrors the old _get_metric_value() per record.
+
+        skip_missing=True drops entries that don't contain this metric.
+        Self-logged entries often hold only one measurement (e.g. just
+        blood pressure), so without this a glucose-only entry would hide
+        yesterday's blood pressure from today's comparison.
         """
         values: List[Optional[float]] = []
         for record in historical_records:
             if isinstance(record.get("metrics"), dict):
-                values.append(record["metrics"].get(metric))
+                value = record["metrics"].get(metric)
             else:
-                values.append(record.get(metric))
+                value = record.get(metric)
+            if skip_missing and value is None:
+                continue
+            values.append(value)
         return values
 
     # ----- the polymorphic evaluation loop (the heart of the refactor) ----
     def evaluate(self, current_metrics: Dict[str, Optional[float]],
-                 historical_records: List[Dict[str, Any]]) -> List[Finding]:
+                 historical_records: List[Dict[str, Any]],
+                 skip_missing: bool = False) -> List[Finding]:
+
         """
         Run every rule over every applicable reading. No type checks on
         the rules - each is asked, uniformly, to evaluate(). Returns all
@@ -658,7 +765,7 @@ class LogicManager:
         for rule in self._rules:
             metric_key = rule.spec.key
             current_value = current_metrics.get(metric_key)
-            history_values = self._history_values(historical_records, metric_key)
+            history_values = self._history_values(historical_records, metric_key, skip_missing)
             finding = rule.evaluate(current_value, history_values)
             if finding is not None:
                 findings.append(finding)
@@ -753,6 +860,14 @@ class LogicManager:
             }
 
         findings = self.evaluate(current_metrics, historical_records)
+        return self._finalise(current_metrics, ai_extracted_date, findings)
+
+    def _finalise(self, current_metrics: Dict[str, Optional[float]],
+                  ai_extracted_date: Optional[str],
+                  findings: List[Finding]) -> Dict[str, Any]:
+        """Score and route a list of findings into the final record dict.
+        Shared by process() (medical reports) and process_manual_reading()
+        (self-logged vitals) so both are judged by exactly the same rules."""
         urgent = [f for f in findings if f.status == "URGENT"]
         flagged = [f for f in findings if f.status == "FLAGGED"]
         changes = [f for f in findings if f.status == "CHANGED"]
@@ -790,7 +905,21 @@ class LogicManager:
             "requires_doctor_review": bool(urgent or flagged),
             "summary": summary,
         }
-    
+
+def process_manual_reading(self, current_metrics: Dict[str, Optional[float]],
+                               previous_entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Evaluate one self-logged vitals entry (already validated by
+        ManualVitalsValidator) against the user's EARLIER self-logged
+        entries only - never against medical-report history, so the two
+        stay separate. ⁠ previous_entries ⁠ must be sorted oldest to newest.
+
+        Uses the same rules and output shape as process(), so the same
+        UI helpers can display it.
+        """
+        findings = self.evaluate(current_metrics, previous_entries, skip_missing=True)
+        return self._finalise(current_metrics, None, findings)
+
 # ===========================================================================
 # Backwards-compatibility shims
 # ---------------------------------------------------------------------------

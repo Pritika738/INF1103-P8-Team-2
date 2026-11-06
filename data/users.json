@@ -35,6 +35,8 @@
         "username": "test81",
         "email": "test81@test.com",
         "salt": "23662a08b14590164344aae1f9eb33b6",
-        "password_hash": "06af7b86065e517ca56804c2c8eb7dc14c24f496a3e875e200d36e95082ad960"
+        "password_hash": "06af7b86065e517ca56804c2c8eb7dc14c24f496a3e875e200d36e95082ad960",
+        "pin_salt": "d0a4753e13740f6b9cbc0bd4fa7ea8c0",
+        "pin_hash": "6d4a8d8a5fe4bc9f85786f481d4c53b5c8fe99877f1d54dcb7480a7fb2c9d70d"
     }
 }
