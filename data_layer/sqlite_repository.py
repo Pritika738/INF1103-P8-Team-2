@@ -18,14 +18,14 @@ No print()/input(), no AI calls, no business rules.
 """
 
 import json
-import os
 import sqlite3
 from contextlib import closing
 from typing import List
 
-from config import HEALTH_RECORDS_DB_FILE
+from config import DATABASE_FILE
 
 from .repositories import RecordRepository
+from .sqlite_db import connect
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS health_records (
@@ -98,7 +98,7 @@ def _row_to_record(row: tuple) -> dict:
 class SqliteRecordRepository(RecordRepository):
     """Stores health records in a SQLite database file."""
 
-    def __init__(self, db_path: str = HEALTH_RECORDS_DB_FILE):
+    def __init__(self, db_path: str = DATABASE_FILE):
         self.__db_path = db_path
 
     @property
@@ -106,11 +106,7 @@ class SqliteRecordRepository(RecordRepository):
         return self.__db_path
 
     def _connect(self) -> sqlite3.Connection:
-        directory = os.path.dirname(self.__db_path) or "."
-        os.makedirs(directory, exist_ok=True)
-        conn = sqlite3.connect(self.__db_path)
-        conn.executescript(_SCHEMA)
-        return conn
+        return connect(self.__db_path, _SCHEMA)
 
     def load_all(self) -> List[dict]:
         """Every stored record in the order it was saved; [] if none or unreadable."""

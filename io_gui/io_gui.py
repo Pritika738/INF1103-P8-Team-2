@@ -426,7 +426,6 @@ if "page" not in st.session_state:
 
 RECORDS_PATH = os.path.join("data", "health_records.json")
 
-USERS_PATH = Path(__file__).resolve().parent.parent / "data" / "users.json"
 
 def load_records():
     if not os.path.exists(RECORDS_PATH):
@@ -1109,55 +1108,23 @@ def hash_password(
 
 def load_accounts() -> dict:
     """
-    Load registered accounts from the users JSON file.
+    Load registered accounts (keyed by lowercased username) through the
+    Data Manager - they live in the "users" table of the app database.
     """
 
-    if not USERS_PATH.exists():
-        return {}
-
-    try:
-
-        with open(
-            USERS_PATH,
-            "r",
-            encoding="utf-8"
-        ) as file:
-
-            accounts = json.load(file)
-
-        if isinstance(accounts, dict):
-            return accounts
-
-    except (
-        json.JSONDecodeError,
-        OSError
-    ):
-        pass
-
-    return {}
+    return data_service.load_accounts()
 
 
 def save_accounts(accounts: dict) -> None:
     """
-    Save registered accounts permanently.
+    Save registered accounts permanently through the Data Manager.
+
+    Raises OSError if the save failed, so callers that already handle a
+    failed write (set_user_pin / remove_user_pin) keep working unchanged.
     """
 
-    USERS_PATH.parent.mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-    with open(
-        USERS_PATH,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        json.dump(
-            accounts,
-            file,
-            indent=4
-        )
+    if not data_service.save_accounts(accounts):
+        raise OSError("Could not save accounts to the database.")
 
 def create_temporary_account(
     username: str,
@@ -1166,10 +1133,7 @@ def create_temporary_account(
 ) -> tuple[bool, str]:
     """
     Create an account and save it permanently
-    to data/users.json.
-
-    Data Manager will take over this responsibility
-    later during integration.
+    (users table of the app database, via the Data Manager).
     """
 
     username = username.strip()
@@ -1303,7 +1267,7 @@ def user_has_pin(username: str) -> bool:
 def set_user_pin(username: str, pin: str) -> bool:
     """
     Set (or replace) a user's quick-login PIN, storing only a salted
-    hash of it in their users.json entry. Every OTHER account is left
+    hash of it in their account entry. Every OTHER account is left
     untouched. Returns True on success, False if the account does not
     exist or the save failed.
     """

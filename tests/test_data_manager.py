@@ -15,7 +15,7 @@ import os
 import pytest
 
 from data_layer import (
-    ConsultationPdfArchive, JsonListStore, JsonObjectStore, JsonRecordRepository,
+    ConsultationPdfArchive, JsonAccountRepository, JsonListStore, JsonObjectStore, JsonRecordRepository,
     JsonStore, MedicalProfileStore, OriginalReportArchive, RecordRepository,
     default_medical_profile,
 )
@@ -35,6 +35,7 @@ def paths(tmp_path):
         "meta": str(tmp_path / "reports.json"),
         "reports": str(tmp_path / "reports"),
         "profiles": str(tmp_path / "profiles.json"),
+        "accounts": str(tmp_path / "users.json"),
     }
 
 
@@ -46,6 +47,7 @@ def make_manager(paths):
             ConsultationPdfArchive(paths["pdfs"], paths["summaries"], max_retained),
             OriginalReportArchive(paths["reports"], paths["meta"]),
             MedicalProfileStore(paths["profiles"]),
+            JsonAccountRepository(paths["accounts"]),
         )
     return _make
 
@@ -94,6 +96,7 @@ class TestDesign:
             ConsultationPdfArchive(paths["pdfs"], paths["summaries"]),
             OriginalReportArchive(paths["reports"], paths["meta"]),
             MedicalProfileStore(paths["profiles"]),
+            JsonAccountRepository(paths["accounts"]),
         )
         assert dm.save_record({"username": "ann", "date": "2026-01-01"}) is True
         assert dm.get_records_by_date("2026-01-01")[0]["username"] == "ann"

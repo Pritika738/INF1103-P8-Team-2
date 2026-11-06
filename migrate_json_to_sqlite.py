@@ -1,49 +1,68 @@
 """
-migrate_records_to_sqlite.py
+migrate_json_to_sqlite.py
 
-One-off migration: copy data/health_records.json into the SQLite database.
+One-off migration: copy the old JSON files into the SQLite database
+(config.DATABASE_FILE). Currently migrates:
+    data/health_records.json -> health_records table
+    data/users.json          -> users table
 
-Safe to run more than once: it refuses to touch a database that already
-holds records, and it never modifies or deletes the JSON file.
+Each table is handled on its own and is safe to run more than once: a
+table that already holds data is skipped, never overwritten. The JSON
+files are never modified or deleted - a "<file>.premigration" backup copy
+is made before anything is written.
 
-Usage:  python migrate_records_to_sqlite.py
+Usage:  python migrate_json_to_sqlite.py
 """
 
+import os
 import shutil
 import sys
 
-from config import HEALTH_RECORDS_DB_FILE, HEALTH_RECORDS_FILE
-from data_layer import JsonRecordRepository, SqliteRecordRepository
+from config import DATABASE_FILE, HEALTH_RECORDS_FILE, USERS_FILE
+from data_layer import (
+    JsonAccountRepository, JsonRecordRepository,
+    SqliteAccountRepository, SqliteRecordRepository,
+)
+
+
+def migrate_one(label: str, json_path: str, source, target) -> bool:
+    """Copy one JSON file into its table. Returns False only on a real failure."""
+    if target.load_all():
+        print(f"[{label}] table already has data - skipped.")
+        return True
+
+    data = source.load_all()
+    if not data:
+        print(f"[{label}] nothing found in {json_path} - skipped.")
+        return True
+
+    backup = json_path + ".premigration"
+    if not os.path.exists(backup):
+        shutil.copy2(json_path, backup)
+        print(f"[{label}] backed up JSON to {backup}")
+
+    if not target.save_all(data):
+        print(f"[{label}] writing to the database FAILED - nothing migrated.")
+        return False
+
+    if target.load_all() != data:
+        print(f"[{label}] verification FAILED: database contents differ from the JSON file.")
+        return False
+
+    print(f"[{label}] migrated {len(data)} entries (verified identical).")
+    return True
 
 
 def migrate() -> int:
-    source = JsonRecordRepository(HEALTH_RECORDS_FILE)
-    target = SqliteRecordRepository(HEALTH_RECORDS_DB_FILE)
-
-    if target.load_all():
-        print(f"{HEALTH_RECORDS_DB_FILE} already contains records - nothing migrated.")
-        return 1
-
-    records = source.load_all()
-    if not records:
-        print("No records found in the JSON file - nothing to migrate.")
-        return 0
-
-    backup = HEALTH_RECORDS_FILE + ".premigration"
-    shutil.copy2(HEALTH_RECORDS_FILE, backup)
-    print(f"Backed up JSON to {backup}")
-
-    if not target.save_all(records):
-        print("Writing to the database failed - nothing migrated.")
-        return 1
-
-    migrated = target.load_all()
-    if migrated != records:
-        print("Verification FAILED: database contents differ from the JSON file.")
-        return 1
-
-    print(f"Migrated {len(migrated)} records to {HEALTH_RECORDS_DB_FILE} (verified identical).")
-    return 0
+    print(f"Database: {DATABASE_FILE}")
+    jobs = [
+        ("health_records", HEALTH_RECORDS_FILE,
+         JsonRecordRepository(HEALTH_RECORDS_FILE), SqliteRecordRepository(DATABASE_FILE)),
+        ("users", USERS_FILE,
+         JsonAccountRepository(USERS_FILE), SqliteAccountRepository(DATABASE_FILE)),
+    ]
+    ok = all([migrate_one(*job) for job in jobs])
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

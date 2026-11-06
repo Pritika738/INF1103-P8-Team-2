@@ -17,9 +17,14 @@ load_dotenv()
 # Location of the local JSON "database" that stores health records.
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 HEALTH_RECORDS_FILE = os.path.join(DATA_DIR, "health_records.json")
-# SQLite database that now stores health records (the JSON file above is
-# kept only as the source for migrate_records_to_sqlite.py and as a backup).
-HEALTH_RECORDS_DB_FILE = os.path.join(DATA_DIR, "health_records.db")
+# The single SQLite database the app stores its data in. Each kind of data
+# has its own table (health_records, users, ...). The JSON files in this
+# folder are kept only as the source for migrate_json_to_sqlite.py.
+DATABASE_FILE = os.path.join(DATA_DIR, "app.db")
+
+# Registered login accounts (salted password/PIN hashes) - migration source
+# only; accounts are now stored in the "users" table of DATABASE_FILE.
+USERS_FILE = os.path.join(DATA_DIR, "users.json")
 
 # Generated consultation-summary PDFs (separate from uploaded medical
 # reports) and the JSON file tracking their metadata.

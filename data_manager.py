@@ -41,11 +41,13 @@ from typing import Any, Dict, List, Optional
 
 from config import LATEST_REPORTS_LIMIT
 from data_layer import (
+    AccountRepository,
     ConsultationPdfArchive,
     JsonRecordRepository,
     MedicalProfileStore,
     OriginalReportArchive,
     RecordRepository,
+    SqliteAccountRepository,
     SqliteRecordRepository,
     default_medical_profile,
 )
@@ -53,6 +55,7 @@ from data_layer import (
 __all__ = [
     "DataManager", "RecordRepository", "JsonRecordRepository", "SqliteRecordRepository",
     "ConsultationPdfArchive", "OriginalReportArchive", "MedicalProfileStore",
+    "AccountRepository", "SqliteAccountRepository",
 ]
 
 
@@ -62,11 +65,13 @@ class DataManager:
     def __init__(self, records: RecordRepository,
                  consultation_pdfs: ConsultationPdfArchive,
                  original_reports: OriginalReportArchive,
-                 medical_profiles: MedicalProfileStore):
+                 medical_profiles: MedicalProfileStore,
+                 accounts: AccountRepository):
         self._records = records                      # aggregation: all injected
         self._consultation_pdfs = consultation_pdfs
         self._original_reports = original_reports
         self._medical_profiles = medical_profiles
+        self._accounts = accounts
 
     @classmethod
     def create(cls) -> "DataManager":
@@ -76,7 +81,20 @@ class DataManager:
             ConsultationPdfArchive(),
             OriginalReportArchive(),
             MedicalProfileStore(),
+            SqliteAccountRepository(),
         )
+
+    # ------------------------------------------------------------------
+    # Login accounts
+    # ------------------------------------------------------------------
+
+    def load_accounts(self) -> Dict[str, dict]:
+        """Every registered account, keyed by lowercased username ({} if none)."""
+        return self._accounts.load_all()
+
+    def save_accounts(self, accounts: Dict[str, dict]) -> bool:
+        """Replace the stored accounts. Returns True on success, False if the write failed."""
+        return self._accounts.save_all(accounts)
 
     # ------------------------------------------------------------------
     # Health records
