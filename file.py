@@ -23,6 +23,13 @@ class ExtractedFile:
         self.__blood_glucose = blood_glucose
         self.__report_date = report_date          # "YYYY-MM-DD" or None
 
+    @staticmethod
+    def _require_text(value: str, field_name: str) -> str:
+        """Return value without surrounding spaces, or raise if it is blank."""
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{field_name} must be a non-empty string.")
+        return value.strip()
+    
     # ------------------------------------------------------------------
     # Construction from AI output
     # ------------------------------------------------------------------
