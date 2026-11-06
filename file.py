@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 class ExtractedFile:
     """A source file plus the validated AI extraction result for it."""
 
-    def __init__(self, source: str, 
+    def __init__(self, source: str,
                  mime_type: str,
                  is_medical_report: bool = False,
                  classification_reason: str = "",
@@ -13,8 +13,8 @@ class ExtractedFile:
                  blood_pressure_diastolic: Optional[float] = None,
                  blood_glucose: Optional[float] = None,
                  report_date: Optional[str] = None):
-        self.__source = source                    # filename / stored path
-        self.__mime_type = mime_type              # e.g. "application/pdf"
+        self.__source = self._require_text(source, "source")
+        self.__mime_type = self._require_text(mime_type, "mime_type")
         self.__is_medical_report = is_medical_report
         self.__classification_reason = classification_reason
         self.__heart_rate = heart_rate

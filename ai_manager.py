@@ -8,7 +8,7 @@ Responsibilities kept OUT of this module:
 - Business rules (normal/high/low, trends)  -> logic_manager.py
 - User-facing input/output (print/input)    -> io_manager.py
 - Persistence                               -> data_manager.py
-- Talking to a specific AI vendor           -> ai/client.py
+- Talking to a specific AI vendor           -> ai_layer/client.py
 
 Object relationships (see UML):
 - AIManager o-- AIClient     aggregation: the client is injected, can be
@@ -21,7 +21,7 @@ Object relationships (see UML):
 
 from typing import Optional
 
-from ai import (
+from ai_layer import (
     AIClient, AIServiceError, GeminiClient, MockAIClient,
     ResponseParser, RetryPolicy,
     ExtractionTask, VerificationTask, NarrativeTask,

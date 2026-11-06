@@ -1,749 +1,295 @@
 """
 data_manager.py
 
-Responsible for JSON file persistence only.
+The Data Manager: saves, loads and queries everything the application
+persists (health records, consultation-summary PDFs, original report
+files, medical profiles). Missing or corrupt files are handled
+gracefully - a missing file reads as empty, a corrupt one is backed up
+to "<file>.bak" before an empty value is returned.
 
 Rules for this module:
 - No print() or input() calls here.
-- No AI calls, no business rules - just reading/writing the records file.
-- Callers (io_manager / main) are responsible for reporting errors to the user.
+- No AI calls, no business rules - just persistence and querying.
+- Callers (io_manager / the GUI) are responsible for reporting errors
+  to the user.
 
-save_record()/get_records_by_date() are the lecturer-facing entry points
-for the AI+Logic Manager pipeline: save_record() stores whatever
-logic_manager.process_ai_record() returns (the "Processed Record" in
-the project's architecture diagram), stamping today's date onto it if
-it doesn't already have one - that is bookkeeping about when a record
-was persisted, not a medical judgment, so it stays in scope here.
-load_health_records()/save_health_records()/add_health_record() are
-unchanged and still used directly by main.py's CLI flow.
+Object relationships (see UML):
+- DataManager o-- RecordRepository, ConsultationPdfArchive,
+  OriginalReportArchive, MedicalProfileStore
+                       aggregation: they are injected, can be built and
+                       used on their own (and are in the tests), and do
+                       not depend on DataManager.
+- JsonRecordRepository *-- JsonListStore, and each archive/profile store
+  *-- its own JsonStore
+                       composition: the store is created and owned by the
+                       class that uses it.
+- JsonStore <|-- JsonListStore, JsonObjectStore       inheritance
+- RecordRepository <|.. JsonRecordRepository          interface
+  (another backend, e.g. a database, only needs another subclass)
+
+save_record()/get_records_by_date() are the entry points for the
+AI + Logic Manager pipeline: save_record() stores whatever
+logic_manager.process_ai_record() returns (the "Processed Record" in the
+architecture diagram), stamping today's date onto it if it doesn't
+already have one - that is bookkeeping about when a record was
+persisted, not a medical judgment, so it stays in scope here.
 """
 
-import hashlib
-import json
-import os
-import re
-import shutil
 import uuid
-from datetime import date as _date, datetime as _datetime
+from datetime import date as _date
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from config import (
-    HEALTH_RECORDS_FILE,
-    CONSULTATION_PDF_DIR,
-    CONSULTATION_SUMMARIES_FILE,
-    ORIGINAL_REPORTS_DIR,
-    ORIGINAL_REPORTS_FILE,
-    LATEST_REPORTS_LIMIT,
-    MAX_RETAINED_SUMMARY_PDFS,
-    MEDICAL_PROFILES_FILE,
+from config import LATEST_REPORTS_LIMIT, MANUAL_VITALS_FILE
+from data_layer import (
+    ConsultationPdfArchive,
+    JsonRecordRepository,
+    MedicalProfileStore,
+    OriginalReportArchive,
+    RecordRepository,
+    default_medical_profile,
 )
 
-def _backup_corrupted_file(file_path):
-    """
-    Preserve an unreadable/unexpected records file by copying it to
-    "<file_path>.bak" before any caller gets a chance to overwrite it
-    with fresh data. Best-effort only - a failure here (e.g. disk full)
-    is not itself allowed to crash the caller, so it is swallowed.
-    """
-    try:
-        shutil.copy2(file_path, file_path + ".bak")
-    except OSError:
-        pass
+__all__ = [
+    "DataManager", "RecordRepository", "JsonRecordRepository",
+    "ConsultationPdfArchive", "OriginalReportArchive", "MedicalProfileStore",
+]
 
-def load_health_records(file_path=HEALTH_RECORDS_FILE):
-    """
-    Load health records from the JSON file.
 
-    Returns a list of record dictionaries. If the file does not exist,
-    an empty list is returned. If the file contains invalid/corrupted
-    JSON, or valid JSON that isn't a list, the corrupted file is backed
-    up to "<file_path>.bak" (so a later save can't silently destroy it)
-    and an empty list is returned instead of raising an exception.
-    """
-    if not os.path.exists(file_path):
-        return []
+class DataManager:
+    """Single entry point to every kind of stored data."""
 
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except json.JSONDecodeError:
-        _backup_corrupted_file(file_path)
-        return []
-    except OSError:
-        return []
-
-    if not isinstance(data, list):
-        _backup_corrupted_file(file_path)
-        return []
-
-    return data
-
-def save_health_records(records, file_path=HEALTH_RECORDS_FILE):
-    """
-    Save the given list of health record dictionaries to the JSON file.
-
-    Creates the parent directory if it does not already exist. Writes
-    to a temporary file first and then atomically replaces the real
-    file (os.replace()) rather than writing directly into it - if two
-    saves happen close together (e.g. two uploads processed around the
-    same time), a reader can only ever see one complete, valid file,
-    never a half-written mix of both (a "torn write"). This does not
-    prevent one save's data from being lost if another save started
-    from an older snapshot (a "lost update") - full protection against
-    that would need a real file lock, which is not implemented here.
-
-    Returns True on success, False if the write failed.
-    """
-    try:
-        directory = os.path.dirname(file_path) or "."
-        os.makedirs(directory, exist_ok=True)
-        tmp_path = f"{file_path}.tmp-{os.getpid()}"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(records, f, indent=2)
-        os.replace(tmp_path, file_path)
-        return True
-    except OSError:
-        return False
-
-def add_health_record(record, file_path=HEALTH_RECORDS_FILE):
-    """
-    Append a single health record dictionary to the stored records
-    and persist the updated list.
-
-    Returns True on success, False if saving failed.
-    """
-    records = load_health_records(file_path)
-    records.append(record)
-    return save_health_records(records, file_path)
-
-def save_record(record, file_path=HEALTH_RECORDS_FILE):
-    """
-    Save one already-processed health record - e.g. the dict returned
-    by logic_manager.process_ai_record() - preserving all previously
-    stored records (never overwrites history with just this one).
-
-    If `record` has no "date" key, today's date is stamped onto a copy
-    of it before saving, so every stored record can be found again by
-    get_records_by_date(). A unique "record_id" is stamped on the same
-    way if missing, so this specific record can later be found again
-    by update_record_date() - e.g. to correct a report that was saved
-    with the wrong date. The caller's original dict is never mutated.
-
-    Args:
-        record: dict - the processed record to store.
-        file_path: str - which records file to write to (defaults to
-            the real health records file; overridable for testing).
-
-    Returns:
-        True on success, False if saving failed.
-    """
-    record_to_save = dict(record)
-    record_to_save.setdefault("date", _date.today().isoformat())
-    record_to_save.setdefault("record_id", uuid.uuid4().hex)
-    return add_health_record(record_to_save, file_path)
-
-def update_record_date(record_id, new_date, file_path=HEALTH_RECORDS_FILE):
-    """
-    Correct one stored record's "date" field by its record_id,
-    preserving every other field on it and every other record
-    untouched. Used to fix a report that was saved with the wrong date
-    (e.g. a GUI date-picker that defaulted incorrectly).
-
-    Args:
-        record_id: str - the record's unique "record_id" (stamped by
-            save_record(); see backfill_record_ids() for records saved
-            before that existed).
-        new_date: str - the corrected date, "YYYY-MM-DD".
-        file_path: str - which records file to update (defaults to the
-            real health records file; overridable for testing).
-
-    Returns:
-        True if a matching record was found and the save succeeded,
-        False if no record has this ID, or the write failed.
-    """
-    records = load_health_records(file_path)
-
-    found = False
-    for record in records:
-        if record.get("record_id") == record_id:
-            record["date"] = new_date
-            found = True
-            break
-
-    if not found:
-        return False
-
-    return save_health_records(records, file_path)
-
-def backfill_record_ids(file_path=HEALTH_RECORDS_FILE):
-    """
-    Give every stored record that is missing a "record_id" a new one,
-    so records saved before save_record() started stamping one can
-    still be individually found and corrected by update_record_date().
-    Safe to call repeatedly: a record that already has an ID is never
-    touched, and if nothing is missing one, no write happens at all.
-
-    Args:
-        file_path: str - which records file to update (defaults to the
-            real health records file; overridable for testing).
-
-    Returns:
-        The number of records that were given a new ID (0 if every
-        record already had one, or the file is empty/missing).
-    """
-    records = load_health_records(file_path)
-
-    added = 0
-    for record in records:
-        if not record.get("record_id"):
-            record["record_id"] = uuid.uuid4().hex
-            added += 1
-
-    if added:
-        save_health_records(records, file_path)
-
-    return added
-
-def get_records_by_date(target_date, file_path=HEALTH_RECORDS_FILE):
-    """
-    Find all stored records whose "date" field matches `target_date`.
-
-    Args:
-        target_date: str - the date to match exactly, e.g. "2026-09-25".
-        file_path: str - which records file to search (defaults to the
-            real health records file; overridable for testing).
-
-    Returns:
-        A list of matching record dicts (empty if none match). Never
-        raises - relies on load_health_records()'s own safe handling of
-        a missing or corrupted file.
-    """
-    records = load_health_records(file_path)
-    return [record for record in records if record.get("date") == target_date]
-
-def get_latest_reports(records, limit=LATEST_REPORTS_LIMIT):
-    """
-    Select the most recent `limit` records by their own "date" field -
-    the medical report's date, not when it happened to be uploaded or
-    saved. Used for active trend analysis and consultation preparation
-    only; Health History is unaffected and keeps showing every record
-    by calling load_health_records() directly instead of this.
-
-    Two records can legitimately share the same report date (e.g. two
-    reports both dated today). save_record()/add_health_record() always
-    append, so list position already reflects save order - the sort key
-    includes that original position as a tiebreaker, so that among
-    same-dated records, the one saved most recently is still treated as
-    the most recent, instead of arbitrarily picking whichever happened
-    to load first.
-
-    Args:
-        records: list of record dicts (each expected to have a "date").
-        limit: int - how many of the most recent report dates to keep.
-
-    Returns:
-        Up to `limit` records, sorted oldest to newest (matching the
-        order logic_manager.evaluate_health_metrics()/
-        analyze_recent_changes() expect for historical_records).
-        Records with no usable "date" sort as the oldest, so a missing
-        date can never push out a real, dated record from this
-        selection.
-    """
-    def sort_key(indexed_record):
-        index, record = indexed_record
-        return (record.get("date") or "", index)
-
-    indexed = list(enumerate(records))
-    newest_first = sorted(indexed, key=sort_key, reverse=True)
-    latest_indexed = newest_first[:limit]
-    oldest_first = sorted(latest_indexed, key=sort_key)
-    return [record for _, record in oldest_first]
-
-# --- Consultation-summary PDF persistence ---------------------------------
-# These never touch health_records.json - generated summary PDFs and
-# their metadata are tracked completely separately, so pruning old
-# summaries (see max_retained below) can never delete a medical record.
-
-def _safe_filename_component(value):
-    """
-    Turn an arbitrary string (a date, a username, a timestamp) into
-    something safe to use inside a filename - letters, numbers, dashes
-    and underscores only, everything else replaced with "_".
-    """
-    return re.sub(r"[^A-Za-z0-9_-]", "_", str(value)) or "unknown"
-
-def save_consultation_pdf(
-    pdf_bytes,
-    report_date,
-    username,
-    source_record_id=None,
-    pdf_dir=CONSULTATION_PDF_DIR,
-    summaries_file=CONSULTATION_SUMMARIES_FILE,
-    max_retained=MAX_RETAINED_SUMMARY_PDFS,
-):
-    """
-    Save a generated consultation-summary PDF to disk and record its
-    metadata, so it can be listed and re-downloaded later from the
-    Consultation page's Summary History. Only ever touches generated
-    summary PDFs and their own metadata file - never health_records.json.
-
-    This function always writes a new entry - it never checks for or
-    skips duplicates itself. Callers that need "don't save the same
-    summary twice" behaviour (e.g. the GUI, across Streamlit reruns)
-    should check find_consultation_pdf_by_source() first and only call
-    this when it returns None.
-
-    Args:
-        pdf_bytes: bytes - the generated PDF file's contents.
-        report_date: str or None - the medical report date this summary
-            covers (used in the filename/metadata; not necessarily today).
-        username: str - whose summary this is.
-        source_record_id: str or None - the health record ("record_id",
-            see data_manager.save_record()) this summary was generated
-            from. Used by find_consultation_pdf_by_source() to recognise
-            "this exact summary was already saved" without relying on
-            Streamlit session state, so the check still works after a
-            page refresh, a new login, or a container restart.
-        pdf_dir: str - directory PDFs are written to (overridable for
-            testing).
-        summaries_file: str - metadata JSON file (overridable for
-            testing).
-        max_retained: int or None - how many summaries to keep per user
-            before the oldest generated one is deleted; None keeps all.
-
-    Returns:
-        The new metadata dict ({"username", "source_record_id",
-        "report_date", "generated_at", "filename", "pdf_path"}) on
-        success, or None if saving failed.
-    """
-    try:
-        os.makedirs(pdf_dir, exist_ok=True)
-    except OSError:
-        return None
-
-    # Microsecond precision (not just seconds) - several summaries can
-    # genuinely be generated within the same second, and this value is
-    # used both in the filename and to order/prune old ones, so it
-    # must be unique per save.
-    generated_at = _datetime.now().isoformat(timespec="microseconds")
-    filename = (
-        f"consultation_{_safe_filename_component(username)}_"
-        f"{_safe_filename_component(report_date)}_"
-        f"{_safe_filename_component(generated_at.replace(':', '-'))}.pdf"
-    )
-    pdf_path = os.path.join(pdf_dir, filename)
-
-    try:
-        with open(pdf_path, "wb") as f:
-            f.write(pdf_bytes)
-    except OSError:
-        return None
-
-    entry = {
-        "username": username,
-        "source_record_id": source_record_id,
-        "report_date": report_date,
-        "generated_at": generated_at,
-        "filename": filename,
-        # Stored as a path relative to the PDFs directory (not an
-        # absolute host path), since that directory can live somewhere
-        # different inside a Docker container than on the host.
-        "pdf_path": os.path.join(os.path.basename(os.path.normpath(pdf_dir)), filename),
-    }
-
-    summaries = load_health_records(summaries_file)
-    summaries.append(entry)
-
-    if max_retained is not None:
-        other_entries = [s for s in summaries if s.get("username") != username]
-        user_entries = sorted(
-            (s for s in summaries if s.get("username") == username),
-            key=lambda s: s.get("generated_at") or "",
+    def _init_(self, records: RecordRepository,
+                 consultation_pdfs: ConsultationPdfArchive,
+                 original_reports: OriginalReportArchive,
+                 medical_profiles: MedicalProfileStore,
+                 manual_vitals: Optional[RecordRepository] = None):
+        self._records = records                      # aggregation: all injected
+        self._consultation_pdfs = consultation_pdfs
+        self._original_reports = original_reports
+        self._medical_profiles = medical_profiles
+        # Self-logged vitals use the SAME repository class as report
+        # records, just pointed at a different file - so they are stored
+        # completely apart from health_records.json. Optional so existing
+        # callers (and tests) that build a DataManager with four
+        # arguments keep working unchanged.
+        self._manual_vitals = (
+            manual_vitals if manual_vitals is not None
+            else JsonRecordRepository(MANUAL_VITALS_FILE)
         )
-        if len(user_entries) > max_retained:
-            for old in user_entries[:-max_retained]:
-                try:
-                    os.remove(os.path.join(pdf_dir, old["filename"]))
-                except OSError:
-                    pass
-            user_entries = user_entries[-max_retained:]
-        summaries = other_entries + user_entries
 
-    if not save_health_records(summaries, summaries_file):
-        return None
+    @classmethod
+    def create(cls) -> "DataManager":
+        """Build a DataManager that uses the real files configured in config.py."""
+        return cls(
+            JsonRecordRepository(),
+            ConsultationPdfArchive(),
+            OriginalReportArchive(),
+            MedicalProfileStore(),
+            JsonRecordRepository(MANUAL_VITALS_FILE),
+        )
 
-    return entry
+        # ------------------------------------------------------------------
+    # Self-logged vitals (entered by hand, not from a medical report)
+    # ------------------------------------------------------------------
 
-def find_consultation_pdf_by_source(
-    username, source_record_id, summaries_file=CONSULTATION_SUMMARIES_FILE
-):
-    """
-    Look up a previously saved consultation-summary PDF generated from
-    this exact health record, if one exists - the idempotency check
-    behind "don't save the same summary twice". Checking the persisted
-    metadata file (rather than e.g. Streamlit session state) means the
-    check still works after a page refresh, a fresh login, or a
-    container restart, not just within one running session.
+    def save_manual_vital(self, entry: dict) -> Optional[dict]:
+        """Save one self-logged vitals entry, preserving every earlier one.
 
-    Args:
-        username: str - whose summaries to search.
-        source_record_id: str or None - the health record's "record_id"
-            (see data_manager.save_record()). If falsy, this always
-            returns None - there is nothing reliable to match on, so
-            the caller should treat this the same as "not found yet"
-            rather than as a guaranteed-unique summary.
-        summaries_file: str - metadata JSON file (overridable for
-            testing).
+        A unique "record_id" and a "logged_at" timestamp are stamped onto
+        a copy (the caller's dict is never mutated). Returns the saved
+        entry, or None if the write failed.
+        """
+        entry_to_save = dict(entry)
+        entry_to_save.setdefault("record_id", uuid.uuid4().hex)
+        entry_to_save.setdefault("logged_at", datetime.now().isoformat(timespec="seconds"))
 
-    Returns:
-        The existing metadata dict if one is already saved for this
-        user and source_record_id, otherwise None.
-    """
-    if not source_record_id:
-        return None
+        entries = self._manual_vitals.load_all()
+        entries.append(entry_to_save)
+        return entry_to_save if self._manual_vitals.save_all(entries) else None
 
-    summaries = load_health_records(summaries_file)
-    for entry in summaries:
-        if (
-            entry.get("username") == username
-            and entry.get("source_record_id") == source_record_id
-        ):
-            return entry
-    return None
+    def list_manual_vitals(self, username: str) -> List[dict]:
+        """One user's self-logged vitals, sorted oldest to newest by the
+        date (and time, if given) they were MEASURED - not when typed in.
+        Entries measured at the same moment keep their save order."""
+        mine = [
+            (index, e) for index, e in enumerate(self._manual_vitals.load_all())
+            if e.get("username") == username
+        ]
+        mine.sort(key=lambda pair: (pair[1].get("date") or "",
+                                    pair[1].get("time") or "", pair[0]))
+        return [e for _, e in mine]
 
-def list_consultation_pdfs(username, summaries_file=CONSULTATION_SUMMARIES_FILE):
-    """
-    List previously generated consultation-summary PDFs for one user,
-    sorted by when each summary was actually GENERATED (newest first) -
-    not by the medical report date it covers. Two summaries can be
-    generated in the same microsecond in theory; generated_at already
-    carries microsecond precision (see save_consultation_pdf()), so no
-    further tiebreaker is needed in practice.
+    def delete_manual_vital(self, username: str, record_id: str) -> bool:
+        """Delete one self-logged entry by its record_id. Only the owner's
+        own entry can be deleted. Returns True if one was found and the
+        save succeeded, False otherwise."""
+        entries = self._manual_vitals.load_all()
+        kept = [
+            e for e in entries
+            if not (e.get("record_id") == record_id and e.get("username") == username)
+        ]
+        if len(kept) == len(entries):
+            return False
+        return self._manual_vitals.save_all(kept)
 
-    Args:
-        username: str - whose summaries to list.
-        summaries_file: str - metadata JSON file (overridable for
-            testing).
+    # ------------------------------------------------------------------
+    # Health records
+    # ------------------------------------------------------------------
 
-    Returns:
-        A list of metadata dicts (empty if none exist).
-    """
-    summaries = load_health_records(summaries_file)
-    user_entries = [s for s in summaries if s.get("username") == username]
-    return sorted(
-        user_entries,
-        key=lambda s: s.get("generated_at") or "",
-        reverse=True,
-    )
+    def load_health_records(self) -> List[dict]:
+        """Load all health records. Missing file -> []; corrupt file -> backed
+        up to "<file>.bak" and [] returned, never an exception."""
+        return self._records.load_all()
 
-def get_consultation_pdf_bytes(filename, pdf_dir=CONSULTATION_PDF_DIR):
-    """
-    Read back a previously saved consultation-summary PDF's raw bytes
-    for download.
+    def save_health_records(self, records: List[dict]) -> bool:
+        """Replace the stored records. Returns True on success, False if the write failed."""
+        return self._records.save_all(records)
 
-    Args:
-        filename: str - the filename recorded in a
-            list_consultation_pdfs() entry.
-        pdf_dir: str - directory PDFs are stored in (overridable for
-            testing).
+    def add_health_record(self, record: dict) -> bool:
+        """Append one record and persist. Returns True on success, False if saving failed."""
+        records = self._records.load_all()
+        records.append(record)
+        return self._records.save_all(records)
 
-    Returns:
-        The PDF's bytes, or None if the file is missing or unreadable.
-    """
-    # os.path.basename() strips any directory components so a stray
-    # "../" in a filename can never escape pdf_dir.
-    pdf_path = os.path.join(pdf_dir, os.path.basename(filename))
-    try:
-        with open(pdf_path, "rb") as f:
-            return f.read()
-    except OSError:
-        return None
+    def save_record(self, record: dict) -> bool:
+        """Save one already-processed health record, preserving all previously
+        stored records (never overwrites history with just this one).
 
-# --- Original medical report file persistence ------------------------------
-# The actual uploaded PDF/image, kept byte-for-byte as uploaded - distinct
-# from both health_records.json (the AI Manager's extracted numbers) and
-# the consultation-summary PDFs above (the AI Manager's own generated
-# output). Every original report is kept forever regardless of
-# config.LATEST_REPORTS_LIMIT - that limit only affects trend/consultation
-# calculations, never what stays visible in Health History.
+        If `record` has no "date" key, today's date is stamped onto a copy
+        before saving. A unique "record_id" is stamped on the same way if
+        missing, so this specific record can later be found again by
+        update_record_date(). The caller's original dict is never mutated.
+        """
+        record_to_save = dict(record)
+        record_to_save.setdefault("date", _date.today().isoformat())
+        record_to_save.setdefault("record_id", uuid.uuid4().hex)
+        return self.add_health_record(record_to_save)
 
-def _guess_extension(mime_type):
-    """Fallback file extension when the original filename has none."""
-    return {
-        "application/pdf": ".pdf",
-        "image/png": ".png",
-        "image/jpeg": ".jpg",
-    }.get(mime_type, "")
+    def update_record_date(self, record_id: str, new_date: str) -> bool:
+        """Correct one stored record's "date" by its record_id, leaving every
+        other field and record untouched.
 
-def save_original_report(
-    file_bytes,
-    original_filename,
-    mime_type,
-    report_date,
-    username,
-    reports_dir=ORIGINAL_REPORTS_DIR,
-    metadata_file=ORIGINAL_REPORTS_FILE,
-):
-    """
-    Save an uploaded medical report's original file exactly as
-    uploaded - no re-encoding, no format conversion - and record its
-    metadata so it can be found again and linked to its processed
-    health record.
+        Returns True if a matching record was found and the save succeeded,
+        False if no record has this ID, or the write failed.
+        """
+        records = self._records.load_all()
 
-    If the exact same bytes have already been saved for this user
-    (checked by a content hash, not by filename), the existing entry
-    is reused instead of storing a second physical copy - this is the
-    "prevent duplicate storage" requirement. Each stored file is named
-    using a unique ID, never the original filename alone, so two
-    different files that happen to share a name never collide.
+        for record in records:
+            if record.get("record_id") == record_id:
+                record["date"] = new_date
+                return self._records.save_all(records)
 
-    Args:
-        file_bytes: bytes - the uploaded file's raw, unmodified content.
-        original_filename: str - the filename the user uploaded (kept
-            in metadata for display; never used as the stored filename).
-        mime_type: str - e.g. "application/pdf", "image/png".
-        report_date: str or None - the medical report's own date.
-        username: str - whose report this is.
-        reports_dir: str - directory files are written to (overridable
-            for testing).
-        metadata_file: str - metadata JSON file (overridable for
-            testing).
+        return False
 
-    Returns:
-        The metadata dict ({"report_id", "username", "report_date",
-        "upload_date", "filename", "stored_filename", "mime_type",
-        "content_hash"}) on success, or None if saving failed.
-    """
-    content_hash = hashlib.sha256(file_bytes).hexdigest()
+    def backfill_record_ids(self) -> int:
+        """Give every stored record missing a "record_id" a new one. Safe to
+        call repeatedly: records that already have an ID are never touched,
+        and if nothing is missing one, no write happens at all.
 
-    existing = load_health_records(metadata_file)
-    for entry in existing:
-        if entry.get("username") == username and entry.get("content_hash") == content_hash:
-            return entry  # identical file already stored for this user - reuse it
+        Returns the number of records that were given a new ID.
+        """
+        records = self._records.load_all()
 
-    try:
-        os.makedirs(reports_dir, exist_ok=True)
-    except OSError:
-        return None
+        added = 0
+        for record in records:
+            if not record.get("record_id"):
+                record["record_id"] = uuid.uuid4().hex
+                added += 1
 
-    report_id = uuid.uuid4().hex
-    extension = os.path.splitext(original_filename)[1] or _guess_extension(mime_type)
-    stored_filename = f"{report_id}{extension}"
-    file_path = os.path.join(reports_dir, stored_filename)
+        if added:
+            self._records.save_all(records)
 
-    try:
-        with open(file_path, "wb") as f:
-            f.write(file_bytes)
-    except OSError:
-        return None
+        return added
 
-    entry = {
-        "report_id": report_id,
-        "username": username,
-        "report_date": report_date,
-        "upload_date": _date.today().isoformat(),
-        "filename": original_filename,
-        "stored_filename": stored_filename,
-        "mime_type": mime_type,
-        "content_hash": content_hash,
-    }
+    def get_records_by_date(self, target_date: str) -> List[dict]:
+        """Find all stored records whose "date" field matches `target_date` exactly."""
+        return [r for r in self._records.load_all() if r.get("date") == target_date]
 
-    existing.append(entry)
-    if not save_health_records(existing, metadata_file):
-        return None
+    @staticmethod
+    def get_latest_reports(records: List[dict], limit: int = LATEST_REPORTS_LIMIT) -> List[dict]:
+        """Select the most recent `limit` records by their own "date" field -
+        the medical report's date, not when it was uploaded or saved.
 
-    return entry
+        Two records can share the same report date. Records are always
+        appended, so list position reflects save order; that original
+        position is used as a tiebreaker so that among same-dated records the
+        most recently saved is treated as the most recent.
 
-def list_original_reports(username, metadata_file=ORIGINAL_REPORTS_FILE):
-    """
-    List all original uploaded medical report files for one user,
-    sorted by report date, newest first. Never limited to the latest
-    five - Health History always shows every uploaded report.
+        Returns up to `limit` records sorted oldest to newest. Records with no
+        usable "date" sort as the oldest, so a missing date can never push out
+        a real, dated record.
+        """
+        def sort_key(indexed_record):
+            index, record = indexed_record
+            return (record.get("date") or "", index)
 
-    Args:
-        username: str - whose reports to list.
-        metadata_file: str - metadata JSON file (overridable for
-            testing).
+        indexed = list(enumerate(records))
+        newest_first = sorted(indexed, key=sort_key, reverse=True)
+        latest_indexed = newest_first[:limit]
+        oldest_first = sorted(latest_indexed, key=sort_key)
+        return [record for _, record in oldest_first]
 
-    Returns:
-        A list of metadata dicts (empty if none exist).
-    """
-    entries = load_health_records(metadata_file)
-    user_entries = [e for e in entries if e.get("username") == username]
-    return sorted(user_entries, key=lambda e: e.get("report_date") or "", reverse=True)
+    # ------------------------------------------------------------------
+    # Consultation-summary PDFs
+    # ------------------------------------------------------------------
 
-def get_original_report_bytes(stored_filename, reports_dir=ORIGINAL_REPORTS_DIR):
-    """
-    Read back a previously saved original medical report file's raw
-    bytes for download, exactly as it was uploaded.
+    def save_consultation_pdf(self, pdf_bytes: bytes, report_date, username: str,
+                              source_record_id=None) -> Optional[dict]:
+        """Save a generated consultation PDF and its metadata. Returns the
+        metadata dict, or None if saving failed."""
+        return self._consultation_pdfs.save(pdf_bytes, report_date, username, source_record_id)
 
-    Args:
-        stored_filename: str - the "stored_filename" from a
-            list_original_reports() entry.
-        reports_dir: str - directory files are stored in (overridable
-            for testing).
+    def find_consultation_pdf_by_source(self, username: str, source_record_id) -> Optional[dict]:
+        """The already-saved summary for this user and source record, or None."""
+        return self._consultation_pdfs.find_by_source(username, source_record_id)
 
-    Returns:
-        The file's bytes, or None if missing or unreadable.
-    """
-    file_path = os.path.join(reports_dir, os.path.basename(stored_filename))
-    try:
-        with open(file_path, "rb") as f:
-            return f.read()
-    except OSError:
-        return None
+    def list_consultation_pdfs(self, username: str) -> List[dict]:
+        """A user's saved summaries, newest generated first."""
+        return self._consultation_pdfs.list_for_user(username)
 
-def get_original_report_by_id(report_id, metadata_file=ORIGINAL_REPORTS_FILE):
-    """
-    Find one original report's metadata by its report_id - used to
-    link a processed health record (which stores this same report_id)
-    back to its source file.
+    def get_consultation_pdf_bytes(self, filename: str) -> Optional[bytes]:
+        """Raw bytes of a saved summary PDF, or None if missing/unreadable."""
+        return self._consultation_pdfs.read_pdf_bytes(filename)
 
-    Args:
-        report_id: str - the unique ID assigned when the file was saved.
-        metadata_file: str - metadata JSON file (overridable for
-            testing).
+    # ------------------------------------------------------------------
+    # Original medical report files
+    # ------------------------------------------------------------------
 
-    Returns:
-        The matching metadata dict, or None if no entry has this ID.
-    """
-    entries = load_health_records(metadata_file)
-    for entry in entries:
-        if entry.get("report_id") == report_id:
-            return entry
-    return None
+    def save_original_report(self, file_bytes: bytes, original_filename: str, mime_type: str,
+                             report_date, username: str) -> Optional[dict]:
+        """Save an uploaded file exactly as uploaded (reusing an identical
+        earlier upload by the same user). Returns the metadata dict, or None
+        if saving failed."""
+        return self._original_reports.save(
+            file_bytes, original_filename, mime_type, report_date, username
+        )
 
-# --- Medical profile persistence -------------------------------------------
-# A user's standing medical profile: current medications & dosages, blood
-# group, allergies, emergency contacts and hereditary illness flags. Unlike
-# health_records.json (an append-only list of dated readings), a profile is
-# ONE current record per user, so these are stored as a JSON OBJECT keyed by
-# username and each save REPLACES that user's profile rather than appending.
-# Persistence only - all validation (dosage numeric, phone format, blood-group
-# enum, etc.) belongs in logic_manager, and all user messaging in io_manager.
+    def list_original_reports(self, username: str) -> List[dict]:
+        """A user's original reports, newest report date first."""
+        return self._original_reports.list_for_user(username)
 
-def get_default_medical_profile():
-    """
-    Return a fresh, empty medical-profile dict with every expected
-    section present, so callers (GUI/logic) can rely on the shape
-    without defensive key-checking. A new dict is built on every call,
-    so it is never shared or mutated across callers.
+    def get_original_report_bytes(self, stored_filename: str) -> Optional[bytes]:
+        """Raw bytes of a saved original report, or None if missing/unreadable."""
+        return self._original_reports.read_bytes(stored_filename)
 
-    Shape:
-        {
-            "medications":   [ {"name", "dosage_amount", "dosage_unit",
-                                 "frequency"}, ... ],
-            "blood_group":   str,   # e.g. "O+", "" if unknown
-            "allergies":     [ {"allergen", "reaction", "severity"}, ... ],
-            "emergency_contacts": [ {"name", "relationship", "phone",
-                                     "email"}, ... ],
-            "hereditary_illness": {
-                "diabetes":       bool,
-                "blood_pressure": bool,
-                "heart_disease":  bool,
-                "asthma":         bool,
-                "other":          str,   # free text, "" if none
-                "notes":          str,   # e.g. which relative, "" if none
-            },
-        }
-    """
-    return {
-        "medications": [],
-        "blood_group": "",
-        "allergies": [],
-        "emergency_contacts": [],
-        "hereditary_illness": {
-            "diabetes": False,
-            "blood_pressure": False,
-            "heart_disease": False,
-            "asthma": False,
-            "other": "",
-            "notes": "",
-        },
-    }
+    def get_original_report_by_id(self, report_id: str) -> Optional[dict]:
+        """Metadata for one original report by its report_id, or None."""
+        return self._original_reports.find_by_id(report_id)
 
-def _load_all_medical_profiles(profiles_file=MEDICAL_PROFILES_FILE):
-    """
-    Load the raw {username: profile} mapping from the profiles file.
+    # ------------------------------------------------------------------
+    # Medical profiles
+    # ------------------------------------------------------------------
 
-    Mirrors load_health_records()'s safe handling, but for a JSON
-    OBJECT rather than a list: a missing file yields {}, and invalid
-    JSON (or valid JSON that isn't an object) is backed up to
-    "<profiles_file>.bak" before {} is returned, so a later save can
-    never silently destroy an unreadable file.
-    """
-    if not os.path.exists(profiles_file):
-        return {}
+    @staticmethod
+    def get_default_medical_profile() -> Dict[str, Any]:
+        """A fresh, empty medical profile with every expected section present."""
+        return default_medical_profile()
 
-    try:
-        with open(profiles_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except json.JSONDecodeError:
-        _backup_corrupted_file(profiles_file)
-        return {}
-    except OSError:
-        return {}
+    def load_medical_profile(self, username: str) -> Dict[str, Any]:
+        """One user's medical profile, or a complete default one if none exists."""
+        return self._medical_profiles.load(username)
 
-    if not isinstance(data, dict):
-        _backup_corrupted_file(profiles_file)
-        return {}
-
-    return data
-
-def load_medical_profile(username, profiles_file=MEDICAL_PROFILES_FILE):
-    """
-    Load one user's medical profile.
-
-    Returns the stored profile dict for `username`, or a fresh
-    get_default_medical_profile() if the user has none yet (so callers
-    always get a complete, well-shaped dict and never a KeyError).
-    Any sections missing from a stored profile (e.g. one saved before a
-    new section existed) are filled in from the default, so the returned
-    dict always has every expected key.
-
-    Never raises - relies on _load_all_medical_profiles()'s own safe
-    handling of a missing or corrupted file.
-    """
-    profiles = _load_all_medical_profiles(profiles_file)
-    stored = profiles.get(username)
-
-    profile = get_default_medical_profile()
-    if isinstance(stored, dict):
-        # Merge known top-level sections; nested hereditary flags are
-        # merged key-by-key so a newly added flag defaults correctly
-        # instead of disappearing from an older stored profile.
-        for key, default_value in profile.items():
-            if key not in stored:
-                continue
-            if key == "hereditary_illness" and isinstance(stored[key], dict):
-                merged = dict(default_value)
-                merged.update(stored[key])
-                profile[key] = merged
-            else:
-                profile[key] = stored[key]
-        # Preserve bookkeeping stamped by save_medical_profile().
-        if "last_updated" in stored:
-            profile["last_updated"] = stored["last_updated"]
-
-    return profile
-
-def save_medical_profile(username, profile, profiles_file=MEDICAL_PROFILES_FILE):
-    """
-    Save (replace) one user's medical profile, preserving every OTHER
-    user's profile untouched.
-
-    Writes the whole {username: profile} object back atomically via
-    save_health_records() (same temp-file-then-os.replace() strategy),
-    so a reader never sees a half-written profiles file. Stamps today's
-    date onto a COPY of the profile as "last_updated" (bookkeeping about
-    when it was saved, not a medical judgment - in scope here); the
-    caller's original dict is never mutated.
-
-    Returns True on success, False if the write failed.
-    """
-    profiles = _load_all_medical_profiles(profiles_file)
-
-    profile_to_save = dict(profile)
-    profile_to_save["last_updated"] = _date.today().isoformat()
-
-    profiles[username] = profile_to_save
-    return save_health_records(profiles, profiles_file)
+    def save_medical_profile(self, username: str, profile: Dict[str, Any]) -> bool:
+        """Replace one user's medical profile. Returns True on success."""
+        return self._medical_profiles.save(username, profile)
