@@ -59,7 +59,7 @@ __all__ = [
 class DataManager:
     """Single entry point to every kind of stored data."""
 
-    def _init_(self, records: RecordRepository,
+    def __init__(self, records: RecordRepository,
                  consultation_pdfs: ConsultationPdfArchive,
                  original_reports: OriginalReportArchive,
                  medical_profiles: MedicalProfileStore,
