@@ -728,18 +728,27 @@ class LogicManager:
         return report_date
 
     @staticmethod
-    def _history_values(historical_records: List[Dict[str, Any]], metric: str) -> List[Optional[float]]:
+    def _history_values(historical_records: List[Dict[str, Any]], metric: str,
+                        skip_missing: bool = False) -> List[Optional[float]]:
         """
         This metric's past readings, oldest to newest, reading from
         either a flat CLI record or an AI-pipeline record nested under
         'metrics' - mirrors the old _get_metric_value() per record.
+
+        skip_missing=True drops entries that don't contain this metric.
+        Self-logged entries often hold only one measurement (e.g. just
+        blood pressure), so without this a glucose-only entry would hide
+        yesterday's blood pressure from today's comparison.
         """
         values: List[Optional[float]] = []
         for record in historical_records:
             if isinstance(record.get("metrics"), dict):
-                values.append(record["metrics"].get(metric))
+                value = record["metrics"].get(metric)
             else:
-                values.append(record.get(metric))
+                value = record.get(metric)
+            if skip_missing and value is None:
+                continue
+            values.append(value)
         return values
 
     # ----- the polymorphic evaluation loop (the heart of the refactor) ----
