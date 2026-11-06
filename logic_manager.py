@@ -860,6 +860,14 @@ class LogicManager:
             }
 
         findings = self.evaluate(current_metrics, historical_records)
+        return self._finalise(current_metrics, ai_extracted_date, findings)
+
+    def _finalise(self, current_metrics: Dict[str, Optional[float]],
+                  ai_extracted_date: Optional[str],
+                  findings: List[Finding]) -> Dict[str, Any]:
+        """Score and route a list of findings into the final record dict.
+        Shared by process() (medical reports) and process_manual_reading()
+        (self-logged vitals) so both are judged by exactly the same rules."""
         urgent = [f for f in findings if f.status == "URGENT"]
         flagged = [f for f in findings if f.status == "FLAGGED"]
         changes = [f for f in findings if f.status == "CHANGED"]
@@ -897,7 +905,21 @@ class LogicManager:
             "requires_doctor_review": bool(urgent or flagged),
             "summary": summary,
         }
-    
+
+def process_manual_reading(self, current_metrics: Dict[str, Optional[float]],
+                               previous_entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Evaluate one self-logged vitals entry (already validated by
+        ManualVitalsValidator) against the user's EARLIER self-logged
+        entries only - never against medical-report history, so the two
+        stay separate. ⁠ previous_entries ⁠ must be sorted oldest to newest.
+
+        Uses the same rules and output shape as process(), so the same
+        UI helpers can display it.
+        """
+        findings = self.evaluate(current_metrics, previous_entries, skip_missing=True)
+        return self._finalise(current_metrics, None, findings)
+
 # ===========================================================================
 # Backwards-compatibility shims
 # ---------------------------------------------------------------------------
