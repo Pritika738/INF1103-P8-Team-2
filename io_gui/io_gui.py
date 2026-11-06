@@ -1066,26 +1066,26 @@ def sidebar_nav():
                 unsafe_allow_html=True,
             )
         st.markdown("---")
-        if st.button("Dashboard", use_container_width=True):
+        if st.button("Dashboard", width="stretch"):
             go("dashboard")
-        if st.button("Add Report", use_container_width=True):
+        if st.button("Add Report", width="stretch"):
             go("upload")
-        if st.button("Health History", use_container_width=True):
+        if st.button("Health History", width="stretch"):
             go("history")
-        if st.button("Health Trends", use_container_width=True):
+        if st.button("Health Trends", width="stretch"):
             go("trends")
-        if st.button("My Vitals", use_container_width=True):
+        if st.button("My Vitals", width="stretch"):
             go("vitals")
-        if st.button("Consultation", use_container_width=True):
+        if st.button("Consultation", width="stretch"):
             go("consultation")
-        if st.button("Medical Profile", use_container_width=True):
+        if st.button("Medical Profile", width="stretch"):
             go("profile")
-        if st.button("Settings", use_container_width=True):      # ← ADD THIS
+        if st.button("Settings", width="stretch"):      # ← ADD THIS
             go("settings")                                       # ← ADD THIS
         st.markdown("---")
         if st.button(
             "Log Out",
-            use_container_width=True
+            width="stretch"
         ):
 
             for key in list(
@@ -1565,7 +1565,7 @@ def show_login():
             if st.button(
                 "Log In",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             ):
 
                 if not username.strip():
@@ -1609,7 +1609,7 @@ def show_login():
 
             if st.button(
                 "Create Account",
-                use_container_width=True
+                width="stretch"
             ):
 
                 go("register")
@@ -1653,7 +1653,7 @@ def show_login():
 
                 if st.button(
                     "Log In with PIN",
-                    use_container_width=True,
+                    width="stretch",
                 ):
 
                     pin_error = validate_pin(pin_value)
@@ -1749,7 +1749,7 @@ def show_register():
             if st.button(
                 "Create Account",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             ):
 
                 # Check username
@@ -1820,7 +1820,7 @@ def show_register():
 
             if st.button(
                 "Back to Login",
-                use_container_width=True
+                width="stretch"
             ):
 
                 go("login")
@@ -2019,7 +2019,7 @@ def show_profile():
         notes = st.text_input("Notes (e.g. which relative)", value=hereditary.get("notes", ""))
 
     st.write("")
-    if st.button("Save medical profile", type="primary", use_container_width=True):
+    if st.button("Save medical profile", type="primary", width="stretch"):
         raw_profile = {
             "blood_group": "" if blood_group_choice == "Not set" else blood_group_choice,
             "medications": medications,
@@ -2091,7 +2091,7 @@ def show_settings():
             if st.button(
                 "Change PIN" if has_pin else "Set PIN",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
             ):
                 pin_error = validate_pin(new_pin)
                 if pin_error:
@@ -2106,7 +2106,7 @@ def show_settings():
 
         with cols[1]:
             if has_pin:
-                if st.button("Remove PIN", use_container_width=True):
+                if st.button("Remove PIN", width="stretch"):
                     if remove_user_pin(username):
                         st.success("Your quick-login PIN has been removed.")
                         st.rerun()
@@ -2423,7 +2423,7 @@ def show_upload():
         if st.button(
             "Analyze with AI",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         ):
 
             if not uploaded_files:
@@ -2618,7 +2618,7 @@ def show_history():
     decisions = ["All"] + sorted({r["Outcome"] for r in table_rows if r["Outcome"]})
     chosen = st.selectbox("Filter by outcome", decisions)
     view = table_rows if chosen == "All" else [r for r in table_rows if r["Outcome"] == chosen]
-    st.dataframe(view, use_container_width=True, hide_index=True)
+    st.dataframe(view, width="stretch", hide_index=True)
 
     csv_lines = ["Report Date,Outcome,Heart Rate,Systolic BP,Diastolic BP,Blood Glucose"]
     for r in view:
@@ -2839,7 +2839,7 @@ def show_trends():
 
     combined_chart = build_multi_axis_trend_chart(recent_records)
     if combined_chart is not None:
-        st.altair_chart(combined_chart, use_container_width=True)
+        st.altair_chart(combined_chart, width="stretch")
         st.caption(
             "Blood pressure, heart rate, and blood glucose each use their "
             "own scale (right), so they are never compared on one "
@@ -2852,7 +2852,7 @@ def show_trends():
     st.subheader("Measurement table")
     st.dataframe(
         build_readings_table_rows(recent_records),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -3071,7 +3071,7 @@ def show_vitals_history(username, entries):
     outcomes = ["All"] + sorted({r["Outcome"] for r in rows if r["Outcome"]})
     chosen = st.selectbox("Filter by outcome", outcomes, key="vitals_outcome_filter")
     view = rows if chosen == "All" else [r for r in rows if r["Outcome"] == chosen]
-    st.dataframe(view, use_container_width=True, hide_index=True)
+    st.dataframe(view, width="stretch", hide_index=True)
 
     st.download_button(
         "Download my vitals (CSV)",
@@ -3162,7 +3162,7 @@ def show_vitals_trends(entries):
 
             chart = build_vitals_chart(in_period, members, title, unit)
             if chart is not None and max(len(t["values"]) for t in member_trends) >= 2:
-                st.altair_chart(chart, use_container_width=True)
+                st.altair_chart(chart, width="stretch")
             else:
                 st.caption("Add another reading to see a trend line.")
 
