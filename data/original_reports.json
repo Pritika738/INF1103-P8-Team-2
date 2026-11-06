@@ -8,5 +8,135 @@
     "stored_filename": "ebb1abb1dd90493db52bff9ad631870a.pdf",
     "mime_type": "application/pdf",
     "content_hash": "125f0c7edd8c6caadc7ae3e7feed822b2040b646f6adedd56b01097b253977cf"
+  },
+  {
+    "report_id": "395b11ad88a040c4ba46202da2b49558",
+    "username": "tester",
+    "report_date": "2026-12-01",
+    "upload_date": "2026-10-13",
+    "filename": "mock_report_moderate_2.pdf",
+    "stored_filename": "395b11ad88a040c4ba46202da2b49558.pdf",
+    "mime_type": "application/pdf",
+    "content_hash": "b1c9333c74f9a6e6a07b0e686e10772b8d8321a6c17ec81ea0dab7301ccf5f6b"
+  },
+  {
+    "report_id": "e5bd4f48c6b84803b783996e750f262a",
+    "username": "tester",
+    "report_date": "2026-09-22",
+    "upload_date": "2026-10-13",
+    "filename": "mock_report_severe.pdf",
+    "stored_filename": "e5bd4f48c6b84803b783996e750f262a.pdf",
+    "mime_type": "application/pdf",
+    "content_hash": "125f0c7edd8c6caadc7ae3e7feed822b2040b646f6adedd56b01097b253977cf"
+  },
+  {
+    "report_id": "da616b73d4c34875bebd409007761137",
+    "username": "test",
+    "report_date": "2026-07-01",
+    "upload_date": "2026-10-13",
+    "filename": "mock_report_minor.pdf",
+    "stored_filename": "da616b73d4c34875bebd409007761137.pdf",
+    "mime_type": "application/pdf",
+    "content_hash": "1f55bb383f65e724a517aee48b9e6a294a41c0ba3b345f94e8b1a5551d3a457d"
+  },
+  {
+    "report_id": "86bbda4d37fa4585a1d022bd3829bbea",
+    "username": "test1",
+    "report_date": "2026-07-01",
+    "upload_date": "2026-10-13",
+    "filename": "mock_report_minor.pdf",
+    "stored_filename": "86bbda4d37fa4585a1d022bd3829bbea.pdf",
+    "mime_type": "application/pdf",
+    "content_hash": "1f55bb383f65e724a517aee48b9e6a294a41c0ba3b345f94e8b1a5551d3a457d"
+  },
+  {
+    "report_id": "3cb73879005649f39fa3491795470559",
+    "username": "test4",
+    "report_date": "2008-03-07",
+    "upload_date": "2026-10-22",
+    "filename": "MedicalReport1.png",
+    "stored_filename": "3cb73879005649f39fa3491795470559.png",
+    "mime_type": "image/png",
+    "content_hash": "4b06f64c55bdde5bce7fe28517864904e849f4eae299f0532eec31bac18572a2"
+  },
+  {
+    "report_id": "409b5829c195423c9315badbfe688451",
+    "username": "test4",
+    "report_date": "2019-11-06",
+    "upload_date": "2026-10-22",
+    "filename": "MedicalReport2.pdf",
+    "stored_filename": "409b5829c195423c9315badbfe688451.pdf",
+    "mime_type": "application/pdf",
+    "content_hash": "b6fea8e87672edfa42c2d84f11d07d6b3d078759c3ad324d73c6958f808721c2"
+  },
+  {
+    "report_id": "53a6993138094e9e92b54edccff57a9c",
+    "username": "test4",
+    "report_date": "2026-10-11",
+    "upload_date": "2026-10-22",
+    "filename": "MedicalReport3.jpg",
+    "stored_filename": "53a6993138094e9e92b54edccff57a9c.jpg",
+    "mime_type": "image/jpeg",
+    "content_hash": "b1da4ad5610df19ee83a2e82f4bb3e9babe3f7db8ec80e39067e8a4a93718a5c"
+  },
+  {
+    "report_id": "c10747ba847d4b29bf836bc39ab25ea5",
+    "username": "test4",
+    "report_date": "2026-09-22",
+    "upload_date": "2026-10-22",
+    "filename": "mock_report_severe.pdf",
+    "stored_filename": "c10747ba847d4b29bf836bc39ab25ea5.pdf",
+    "mime_type": "application/pdf",
+    "content_hash": "125f0c7edd8c6caadc7ae3e7feed822b2040b646f6adedd56b01097b253977cf"
+  },
+  {
+    "report_id": "e16b56fe538444adbee6c1d530a33b2f",
+    "username": "test",
+    "report_date": "2026-10-11",
+    "upload_date": "2026-11-04",
+    "filename": "MedicalReport3.jpg",
+    "stored_filename": "e16b56fe538444adbee6c1d530a33b2f.jpg",
+    "mime_type": "image/jpeg",
+    "content_hash": "b1da4ad5610df19ee83a2e82f4bb3e9babe3f7db8ec80e39067e8a4a93718a5c"
+  },
+  {
+    "report_id": "404d0e4199504ff0b191adcfa3caf402",
+    "username": "test81",
+    "report_date": "2026-10-11",
+    "upload_date": "2026-11-04",
+    "filename": "MedicalReport3.jpg",
+    "stored_filename": "404d0e4199504ff0b191adcfa3caf402.jpg",
+    "mime_type": "image/jpeg",
+    "content_hash": "b1da4ad5610df19ee83a2e82f4bb3e9babe3f7db8ec80e39067e8a4a93718a5c"
+  },
+  {
+    "report_id": "e1a33f0984a243b3a3ad691703ad15b5",
+    "username": "test81",
+    "report_date": "2019-11-06",
+    "upload_date": "2026-11-04",
+    "filename": "MedicalReport2.pdf",
+    "stored_filename": "e1a33f0984a243b3a3ad691703ad15b5.pdf",
+    "mime_type": "application/pdf",
+    "content_hash": "b6fea8e87672edfa42c2d84f11d07d6b3d078759c3ad324d73c6958f808721c2"
+  },
+  {
+    "report_id": "e0146461259345bcbf4c3e14f63f6928",
+    "username": "test81",
+    "report_date": "2008-03-07",
+    "upload_date": "2026-11-04",
+    "filename": "MedicalReport1.png",
+    "stored_filename": "e0146461259345bcbf4c3e14f63f6928.png",
+    "mime_type": "image/png",
+    "content_hash": "4b06f64c55bdde5bce7fe28517864904e849f4eae299f0532eec31bac18572a2"
+  },
+  {
+    "report_id": "408c8ba4fe6443228770305a891b1b4c",
+    "username": "test81",
+    "report_date": "2026-09-22",
+    "upload_date": "2026-11-04",
+    "filename": "mock_report_severe (1).pdf",
+    "stored_filename": "408c8ba4fe6443228770305a891b1b4c.pdf",
+    "mime_type": "application/pdf",
+    "content_hash": "125f0c7edd8c6caadc7ae3e7feed822b2040b646f6adedd56b01097b253977cf"
   }
 ]

@@ -9,7 +9,9 @@
         "username": "test",
         "email": "test@gmail.com",
         "salt": "aca761f56b4d1dd85dc476c7a9fd7956",
-        "password_hash": "e7686bb0252b2428ddc988c5528a084a57c471ed57d12d5a4ced7c20670a0ad9"
+        "password_hash": "e7686bb0252b2428ddc988c5528a084a57c471ed57d12d5a4ced7c20670a0ad9",
+        "pin_salt": "2f5cce5f36f52fd118a43ada9356973a",
+        "pin_hash": "fe64444950be007cc9c083a27699877d811563b0812b2f505f6e3cbbc9c32421"
     },
     "test1": {
         "username": "test1",
@@ -17,10 +19,30 @@
         "salt": "5ec6a2c7d3d642b552719218298cc7e1",
         "password_hash": "123f8e12bc429ce84e74e0fe40a95dc9debc392864c49fd899748cd9adb14cb0"
     },
+<<<<<<< HEAD
     "tester2008": {
         "username": "tester2008",
         "email": "test@g.com",
         "salt": "ffd049b062d4949bb6aa4879e00c73e7",
         "password_hash": "db92fe15de86d630cbe15d12cfb11e7e3f5e379001575552cb5c43f9c3bfc527"
+=======
+    "tester": {
+        "username": "tester",
+        "email": "tester@test.com",
+        "salt": "7868998966f7523a489503a869d7b9a1",
+        "password_hash": "182f7df13a5e2d9c45666d2a4af1450a64055b8ee8b9814d62378dc8fda70d4d"
+    },
+    "test4": {
+        "username": "test4",
+        "email": "test4@gmail.com",
+        "salt": "ed28fdd2904ff1710fe64ea101cde473",
+        "password_hash": "d2964a2cdfde421911eb34726d10e0e63d063b49f770783c8132296086199504"
+    },
+    "test81": {
+        "username": "test81",
+        "email": "test81@test.com",
+        "salt": "23662a08b14590164344aae1f9eb33b6",
+        "password_hash": "06af7b86065e517ca56804c2c8eb7dc14c24f496a3e875e200d36e95082ad960"
+>>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
     }
 }

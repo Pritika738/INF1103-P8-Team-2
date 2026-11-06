@@ -7,16 +7,56 @@ stored history, applies clinical threshold rules in plain Python, and
 decides an outcome for the record. It never diagnoses a condition,
 prescribes a treatment, or replaces professional medical advice - it
 only decides what is worth flagging for the user to discuss with a
-doctor.
+doctor. It also validates the user's standing medical profile
+(medications, blood group, allergies, emergency contacts, hereditary
+illness) - reference data, not measurements, so no thresholds/scoring.
+
+Phase 2 - fully object-oriented
+-------------------------------
+There is no remaining procedural business logic in this module: every
+rule, threshold set, classification, and the orchestration itself lives
+in a class. The three module-level names other modules still import
+(process_ai_record, validate_medical_profile, METRIC_LABELS) are kept
+at the bottom purely as thin backwards-compatibility shims that
+delegate to the classes, so io_gui.py and data_manager need no change.
 
 Rules for this module:
 - No print() or input() calls here (except inside the __main__ demo
   block at the bottom, which only runs when this file is executed
   directly with `python logic_manager.py`, never when imported).
 - No network/AI calls here.
-- No file operations here (the demo block's optional mock-file loader
-  is the one exception, and it is isolated inside __main__ too).
+- No file operations here.
 - Works purely on dicts/lists already handed to it by other modules.
+
+OOP concepts demonstrated here
+------------------------------
+- Abstract classes / interfaces : MetricSpec, Rule (both ABCs).
+- Inheritance                   : HeartRate / SystolicBloodPressure /
+                                  DiastolicBloodPressure / BloodGlucose
+                                  subclass MetricSpec; the three Rule
+                                  subclasses specialise Rule.
+- Polymorphism                  : LogicManager.evaluate() calls
+                                  rule.evaluate(...) without knowing the
+                                  concrete rule; MetricSpec.classify().
+- Encapsulation                 : thresholds held as private attrs set
+                                  at construction, not mutable globals.
+- Aggregation                   : LogicManager holds a list of Rule
+                                  objects that exist independently of it.
+- Composition                   : a processed report owns its Finding
+                                  objects (they have no life outside it);
+                                  LogicManager owns its SafetyGuardrail.
+- Association                   : each Rule refers to a MetricSpec it
+                                  evaluates, without owning its lifecycle.
+
+SOLID evidence
+--------------
+- SRP : each Rule has one reason to change; LogicManager orchestrates;
+        MedicalProfileValidator is wholly separate from vital-sign logic.
+- OCP : adding a new clinical rule means writing a new Rule subclass and
+        adding it to the list passed to LogicManager - zero edits to the
+        engine. See LogicManager.default() for the current rule set.
+- LSP : any Rule is substitutable wherever the engine expects one; any
+        MetricSpec is substitutable wherever a reading is classified.
 
 Input contract
 --------------
@@ -26,587 +66,776 @@ shaped like:
     {"heart_rate": number or None,
      "blood_pressure": {"systolic": number or None,
                          "diastolic": number or None} or None,
-     "blood_glucose": number or None}
+     "blood_glucose": number or None,
+     "report_date": "YYYY-MM-DD" or None,
+     "is_medical_report": bool (optional),
+     "classification_reason": str (optional)}
 
 Historical records (`historical_records`) are whatever
 data_manager.load_health_records() returns: a list of dicts using the
-flat key names in config.SUPPORTED_METRICS (blood_pressure_systolic,
-blood_pressure_diastolic, heart_rate, blood_glucose, ...), assumed
-sorted oldest to newest.
+flat key names in config.SUPPORTED_METRICS, assumed sorted oldest to
+newest (metric keys may sit at the top level for CLI-entered records,
+or under "metrics" for AI-pipeline records).
 
-process_ai_record() is the single entry point that bridges these two
-shapes (via flatten_ai_metrics()) and returns one finalized,
-JSON-serialisable report dict.
+LogicManager.process() is the single entry point that bridges the AI
+shape and history, applies all business rules, and returns one
+finalized, JSON-serialisable report dict.
 """
 
+from __future__ import annotations
+
 import re
+from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
+# ===========================================================================
+# Enumerations - small, self-describing value types
+# ===========================================================================
 
-
-# --- Tracked metrics -----------------------------------------------------
-# Strictly limited to the three measurements ai_manager.py extracts.
-# Blood pressure is tracked as two separate numbers throughout this
-# module (matching config.SUPPORTED_METRICS), even though ai_manager's
-# raw output nests them under one "blood_pressure" key - see
-# flatten_ai_metrics() below.
-
-TRACKED_METRICS = [
-    "blood_pressure_systolic",
-    "blood_pressure_diastolic",
-    "blood_glucose",
-    "heart_rate",
-]
-# ADDING METRIC LABELS
-METRIC_LABELS = {
-    "blood_pressure_systolic": "Systolic Blood Pressure",
-    "blood_pressure_diastolic": "Diastolic Blood Pressure",
-    "blood_glucose": "Blood Glucose",
-    "heart_rate": "Heart Rate",
-}
-
-
-# --- Clinical thresholds --------------------------------------------------
-# These are business-rule cutoffs used only to decide what is worth
-# flagging for discussion with a doctor - commonly-cited reference
-# points for a student project demo, not a medical guideline, and never
-# used to name or diagnose a condition.
-
-# A single CURRENT reading at or above these values is treated as an
-# immediate, high-severity concern regardless of trend history (e.g.
-# systolic/diastolic >= these values is widely cited as "hypertensive
-# crisis" territory; glucose >= 13.9 mmol/L / ~250 mg/dL is a commonly
-# cited threshold for concern; heart_rate >= 130 bpm is sustained
-# tachycardia).
-URGENT_THRESHOLDS = {
-    "blood_pressure_systolic": 180,
-    "blood_pressure_diastolic": 120,
-    "blood_glucose": 13.9,
-    "heart_rate": 130,
-}
-
-# A current reading above these, WITH a persistent 3-visit upward trend,
-# is flagged as worth discussing at the next consultation (not urgent).
-TREND_FLAG_THRESHOLDS = {
-    "blood_pressure_systolic": 130,
-    "blood_pressure_diastolic": 80,
-    "blood_glucose": 7.0,
-    "heart_rate": 100,
-}
-
-# Day-to-day deltas within these bounds are normal fluctuation and are
-# NOT reported as a "CHANGED" metric by analyze_recent_changes() - UNLESS
-# the classification itself changed (see _metric_classification() and
-# classification_changed below), since even a small numeric move across
-# a threshold boundary is a notable change, not noise. This tolerance
-# has no effect on evaluate_health_metrics(), which uses the thresholds
-# above instead.
-RECENT_CHANGE_TOLERANCES = {
-    "blood_pressure_systolic": 5,
-    "blood_pressure_diastolic": 4,
-    "blood_glucose": 0.5,
-    "heart_rate": 5,
-}
-
-
-def _metric_classification(metric, value):
+class Tier(Enum):
     """
-    Classify a single reading into a severity tier using the existing
-    approved thresholds above - independent of trend history. This is
-    only used to detect when a reading crosses from one classification
-    to another between two visits (e.g. "severe" to "normal"); it is
-    not the same thing as evaluate_health_metrics()'s overall FLAGGED
-    tier, which additionally requires a persistent 3-visit trend.
-
-    Returns "SEVERE" (at/above URGENT_THRESHOLDS), "ELEVATED" (above
-    TREND_FLAG_THRESHOLDS but below URGENT_THRESHOLDS), "NORMAL"
-    (at/below TREND_FLAG_THRESHOLDS), or None if `value` is None.
+    Severity tier for a single reading, independent of trend history.
+    Replaces the old _metric_classification() bare strings ("SEVERE",
+    "ELEVATED", "NORMAL") with a proper type.
     """
-    if value is None:
-        return None
-    if value >= URGENT_THRESHOLDS[metric]:
-        return "SEVERE"
-    if value > TREND_FLAG_THRESHOLDS[metric]:
-        return "ELEVATED"
-    return "NORMAL"
+    NORMAL = "NORMAL"
+    ELEVATED = "ELEVATED"
+    SEVERE = "SEVERE"
 
 
-def flatten_ai_metrics(ai_extracted: Optional[Dict[str, Any]]) -> Dict[str, Optional[float]]:
+class Decision(Enum):
     """
-    Convert ai_manager's nested extraction shape into the flat key
-    names used everywhere else in this module (TRACKED_METRICS), which
-    also match how data_manager stores historical records - so a fresh
-    reading and past readings can be compared using identical keys.
-
-    Args:
-        ai_extracted: the dict ai_manager.call_ai_with_retry() returned,
-            or None if the AI Manager gave up after retrying.
-
-    Returns:
-        A flat dict with exactly the keys in TRACKED_METRICS. Always
-        returns all four keys - missing/unavailable ones are None -
-        even if `ai_extracted` itself is None or malformed.
+    Final routing outcome for a processed record. Same five string
+    values the procedural version produced, so stored/serialised records
+    look identical to the old pipeline's output.
     """
-    if not isinstance(ai_extracted, dict):
-        return {metric: None for metric in TRACKED_METRICS}
-
-    blood_pressure = ai_extracted.get("blood_pressure") or {}
-
-    return {
-        "heart_rate": ai_extracted.get("heart_rate"),
-        "blood_pressure_systolic": blood_pressure.get("systolic"),
-        "blood_pressure_diastolic": blood_pressure.get("diastolic"),
-        "blood_glucose": ai_extracted.get("blood_glucose"),
-    }
+    NOT_MEDICAL_REPORT = "NOT_MEDICAL_REPORT"
+    REJECTED = "REJECTED"
+    URGENT = "URGENT"
+    FLAGGED = "FLAGGED"
+    ACCEPTED = "ACCEPTED"
 
 
-def _extract_report_date(ai_extracted: Optional[Dict[str, Any]]) -> Optional[str]:
+# ===========================================================================
+# MetricSpec hierarchy - ABSTRACT CLASS + INHERITANCE + ENCAPSULATION
+# ===========================================================================
+
+class MetricSpec(ABC):
     """
-    Safely read the AI Manager's extracted "report_date" out of the raw
-    extraction dict, if present.
+    Abstract description of one tracked health metric: its storage key,
+    human label, unit, and the thresholds used to classify a single
+    reading of it. Subclasses supply the metric-specific numbers.
 
-    ai_manager.validate_schema() and verify_source() have already
-    checked this is a genuine, source-backed "YYYY-MM-DD" date (or
-    None) by the time it normally reaches this module - this function
-    re-checks the format defensively anyway, so calling
-    process_ai_record() directly with unvalidated data still can't
-    crash or silently accept a malformed date string. This module never
-    invents a replacement date itself if the result is None - deciding
-    what (if anything) to fall back to is left to the caller.
+    This replaces the four parallel module-level dicts in the old file
+    (METRIC_LABELS, URGENT_THRESHOLDS, TREND_FLAG_THRESHOLDS,
+    RECENT_CHANGE_TOLERANCES) with one cohesive object per metric, so a
+    metric's data can never drift out of sync across four dicts.
 
-    Args:
-        ai_extracted: the dict ai_manager.call_ai_with_retry() returned,
-            or None.
-
-    Returns:
-        The "YYYY-MM-DD" string if present and genuinely a valid
-        calendar date, otherwise None.
+    All four tracked metrics currently use "higher is worse" thresholds,
+    so the shared classify()/is_improvement() logic lives here in the
+    base class; a future "lower is worse" metric would override them.
     """
-    if not isinstance(ai_extracted, dict):
-        return None
 
-    report_date = ai_extracted.get("report_date")
-    if not isinstance(report_date, str):
-        return None
+    def __init__(self, key: str, label: str, unit: str,
+                 urgent_at: float, flag_above: float, tolerance: float):
+        self._key = key
+        self._label = label
+        self._unit = unit
+        self._urgent_at = urgent_at
+        self._flag_above = flag_above
+        self._tolerance = tolerance
 
-    try:
-        datetime.strptime(report_date, "%Y-%m-%d")
-    except ValueError:
-        return None
+    @property
+    def key(self) -> str:
+        return self._key
 
-    return report_date
+    @property
+    def label(self) -> str:
+        return self._label
+
+    @property
+    def unit(self) -> str:
+        return self._unit
+
+    @property
+    def flag_above(self) -> float:
+        return self._flag_above
+
+    @property
+    def tolerance(self) -> float:
+        return self._tolerance
+
+    def classify(self, value: Optional[float]) -> Optional[Tier]:
+        """Classify a single reading into a Tier - OOP _metric_classification()."""
+        if value is None:
+            return None
+        if value >= self._urgent_at:
+            return Tier.SEVERE
+        if value > self._flag_above:
+            return Tier.ELEVATED
+        return Tier.NORMAL
+
+    def is_urgent(self, value: Optional[float]) -> bool:
+        """True if a single current reading alone is urgent."""
+        return value is not None and value >= self._urgent_at
+
+    def is_improvement(self, delta: float) -> bool:
+        """For 'higher is worse' metrics a decrease improves. Overridable (LSP)."""
+        return delta < 0
+class HeartRate(MetricSpec):
+    def __init__(self):
+        super().__init__(
+            key="heart_rate", label="Heart Rate", unit="bpm",
+            urgent_at=130, flag_above=100, tolerance=5,
+        )
 
 
-def _get_metric_value(record, metric):
+class SystolicBloodPressure(MetricSpec):
+    def __init__(self):
+        super().__init__(
+            key="blood_pressure_systolic", label="Systolic Blood Pressure",
+            unit="mmHg", urgent_at=180, flag_above=130, tolerance=5,
+        )
+
+
+class DiastolicBloodPressure(MetricSpec):
+    def __init__(self):
+        super().__init__(
+            key="blood_pressure_diastolic", label="Diastolic Blood Pressure",
+            unit="mmHg", urgent_at=120, flag_above=80, tolerance=4,
+        )
+
+
+class BloodGlucose(MetricSpec):
+    def __init__(self):
+        super().__init__(
+            key="blood_glucose", label="Blood Glucose", unit="mmol/L",
+            urgent_at=13.9, flag_above=7.0, tolerance=0.5,
+        )
+    # ===========================================================================
+# Value object produced by the rules / engine
+# ===========================================================================
+
+class Finding:
     """
-    Read one metric's value from a historical record, which may be
-    shaped either as a flat CLI-entered record (metric keys directly
-    at the top level - see io_manager.prompt_new_health_record(), still
-    saved via data_manager.add_health_record()) or as a full AI-pipeline
-    processed record (metric keys nested under "metrics" - see
-    data_manager.save_record(), which stores exactly what
-    process_ai_record() below returns). Without this, reading historical
-    records saved by the real AI pipeline silently found nothing, and
-    trend/change detection never fired against real data.
+    One rule's conclusion about one metric. Replaces the loose
+    {"metric", "status", "reason", ...} dicts the old functions built.
+    JSON-serialisable via to_dict() so stored records match the
+    procedural pipeline's output shape exactly.
     """
-    if isinstance(record.get("metrics"), dict):
-        return record["metrics"].get(metric)
-    return record.get(metric)
 
+    def __init__(self, metric: str, status: str, **extra: Any):
+        self._metric = metric
+        self._status = status
+        self._extra = extra
 
-def evaluate_health_metrics(
-    current_metrics: Dict[str, Optional[float]],
-    historical_records: List[Dict[str, Any]],
-) -> List[Dict[str, str]]:
+    @property
+    def status(self) -> str:
+        return self._status
+
+    @property
+    def metric(self) -> str:
+        return self._metric
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"metric": self._metric, "status": self._status, **self._extra}
+
+# ===========================================================================
+# Rule hierarchy - ABSTRACT CLASS + INHERITANCE + POLYMORPHISM (OCP core)
+# ===========================================================================
+
+class Rule(ABC):
     """
-    Evaluate the current reading for each tracked metric against two
-    severity tiers:
-
-    1. URGENT - a multi-condition-free but immediate check: does the
-       CURRENT reading alone cross URGENT_THRESHOLDS? A single
-       dangerously high reading is worth flagging right away, without
-       waiting for a pattern to emerge across visits.
-    2. FLAGGED - a genuinely multi-conditional rule: the current
-       reading must (a) exceed the lower TREND_FLAG_THRESHOLDS, AND
-       (b) have been strictly increasing for the last three
-       consecutive readings (today > previous visit > the visit before
-       that). Either condition alone is not enough to flag.
-
-    Assumes `historical_records` is sorted oldest to newest, so the
-    most recent past visit is historical_records[-1].
-
-    Args:
-        current_metrics: flat dict from flatten_ai_metrics().
-        historical_records: list of past health record dicts.
-
-    Returns:
-        A list of finding dicts, each with "metric", "status" ("URGENT"
-        or "FLAGGED"), and "reason". Never mentions a disease name or a
-        treatment - only describes the numbers and the pattern.
+    Abstract business rule for ONE metric. Subclasses implement
+    evaluate(); the engine runs them without checking concrete type
+    (polymorphism), so a new rule can be added without touching
+    LogicManager (OCP). Association: a Rule refers to the MetricSpec it
+    evaluates but does not own it (specs are shared across rules).
     """
-    findings = []
 
-    for metric in TRACKED_METRICS:
-        current_val = current_metrics.get(metric)
-        if current_val is None:
-            continue  # nothing to evaluate for a metric that wasn't extracted
+    def __init__(self, spec: MetricSpec):
+        self._spec = spec
 
-        label = METRIC_LABELS[metric]
+    @property
+    def spec(self) -> MetricSpec:
+        return self._spec
 
-        # --- Tier 1: immediate danger from this reading alone ---
-        if current_val >= URGENT_THRESHOLDS[metric]:
-            findings.append({
-                "metric": label,
-                "status": "URGENT",
-                "reason": (
-                    f"{label} reading of {current_val} is at a level that "
-                    "usually warrants prompt medical attention."
+    @abstractmethod
+    def evaluate(self, current_value: Optional[float],
+                 history_values: List[Optional[float]]) -> Optional[Finding]:
+        """
+        Return a Finding if this rule fires for the given reading, else
+        None. `history_values` is this metric's past readings, oldest to
+        newest (so the most recent past reading is history_values[-1]).
+        """
+        raise NotImplementedError
+
+
+class UrgentThresholdRule(Rule):
+    """
+    Tier 1: a single CURRENT reading at/above the urgent threshold is
+    flagged immediately, regardless of trend history. Not multi-
+    conditional by design - one dangerously high reading shouldn't wait
+    for a pattern to emerge across visits.
+    """
+
+    def evaluate(self, current_value, history_values):
+        if not self._spec.is_urgent(current_value):
+            return None
+        return Finding(
+            metric=self._spec.label,
+            status="URGENT",
+            reason=(
+                f"{self._spec.label} reading of {current_value} is at a "
+                "level that usually warrants prompt medical attention."
+            ),
+        )
+class PersistentTrendRule(Rule):
+    """
+    Tier 2 - the genuinely MULTI-CONDITION rule the brief requires
+    preserved. Fires only when BOTH hold:
+      (a) the current reading exceeds the lower flag threshold, AND
+      (b) it has been strictly increasing across the last three
+          consecutive readings (today > previous visit > the one before).
+    Either condition alone is not enough.
+    """
+
+    def __init__(self, spec: MetricSpec, visits: int = 3):
+        super().__init__(spec)
+        self._visits = visits
+
+    def evaluate(self, current_value, history_values):
+        if current_value is None:
+            return None
+        if current_value <= self._spec.flag_above:
+            return None
+        # An urgent reading is already handled by UrgentThresholdRule.
+        if self._spec.is_urgent(current_value):
+            return None
+        if len(history_values) < 2:
+            return None
+
+        past_1 = history_values[-1]
+        past_2 = history_values[-2]
+
+        if (past_1 is not None and past_2 is not None
+                and current_value > past_1 > past_2):
+            return Finding(
+                metric=self._spec.label,
+                status="FLAGGED",
+                reason=(
+                    f"{self._spec.label} ({current_value}) is elevated and "
+                    "has been rising for three consecutive readings."
                 ),
-            })
-            continue  # already the most severe finding possible for this metric
+            )
+        return None
 
-        # --- Tier 2: multi-conditional persistent upward trend ---
-        if current_val <= TREND_FLAG_THRESHOLDS[metric] or len(historical_records) < 2:
-            continue
-
-        past_1 = _get_metric_value(historical_records[-1], metric)
-        past_2 = _get_metric_value(historical_records[-2], metric)
-
-        if past_1 is not None and past_2 is not None and current_val > past_1 > past_2:
-            findings.append({
-                "metric": label,
-                "status": "FLAGGED",
-                "reason": (
-                    f"{label} ({current_val}) is elevated and has been "
-                    "rising for three consecutive readings."
-                ),
-            })
-
-    return findings
-
-
-def analyze_recent_changes(
-    current_metrics: Dict[str, Optional[float]],
-    historical_records: List[Dict[str, Any]],
-) -> List[Dict[str, str]]:
+class RecentChangeRule(Rule):
     """
-    Compare the current metrics against only the single most recent
-    past record, to give direct "this went up/down since last time"
-    feedback. Deltas within RECENT_CHANGE_TOLERANCES are treated as
-    normal fluctuation and are not reported.
-
-    Args:
-        current_metrics: flat dict from flatten_ai_metrics().
-        historical_records: list of past health record dicts, assumed
-            sorted oldest to newest.
-
-    Returns:
-        A list of change dicts, each with "metric", "status"
-        ("CHANGED"), "assessment" ("improved"/"worsened"),
-        "classification_changed" (bool), "previous_classification",
-        "current_classification", and "feedback".
+    Compare the current reading against only the single most recent past
+    reading. Deltas within this metric's tolerance are normal
+    fluctuation and ignored - UNLESS the reading crossed a classification
+    boundary (e.g. severe to normal), which is always notable even if
+    numerically small.
     """
-    changes = []
 
-    if not historical_records:
-        return changes # no past data to compare against
+    def evaluate(self, current_value, history_values):
+        if current_value is None or not history_values:
+            return None
 
-    last_record = historical_records[-1]
+        past_val = history_values[-1]
+        if past_val is None:
+            return None	
 
-    for metric in TRACKED_METRICS:
-        current_val = current_metrics.get(metric)
-        past_val = _get_metric_value(last_record, metric)
-
-        # Explicit None-checks (not truthiness) so a genuine reading of
-        # 0 is never mistaken for "no data".
-        if current_val is None or past_val is None:
-            continue
-
-        delta = current_val - past_val
-        past_class = _metric_classification(metric, past_val)
-        current_class = _metric_classification(metric, current_val)
+        delta = current_value - past_val
+        past_class = self._spec.classify(past_val)
+        current_class = self._spec.classify(current_value)
         classification_changed = past_class != current_class
 
-        # A tiny numeric move is still notable if it crossed a
-        # classification boundary (e.g. 181 -> 179 looks small, but
-        # it's a genuine severe-to-normal transition) - report it even
-        # though it's within the normal-fluctuation tolerance.
-        if abs(delta) <= RECENT_CHANGE_TOLERANCES[metric] and not classification_changed:
-            continue  # within normal day-to-day fluctuation
+        if abs(delta) <= self._spec.tolerance and not classification_changed:
+            return None  # within normal day-to-day fluctuation
 
-        label = METRIC_LABELS[metric]
+        label = self._spec.label
         direction = "increased" if delta > 0 else "decreased"
-        # All four tracked metrics use "higher is worse" thresholds
-        # (see URGENT_THRESHOLDS/TREND_FLAG_THRESHOLDS above), so a
-        # decrease is always the improving direction here. This labels
-        # the change explicitly as "improved"/"worsened" so a later
-        # summary never has to guess whether a change was good or bad -
-        # it reads this classification instead of inventing one.
-        assessment = "worsened" if delta > 0 else "improved" 
+        improved = self._spec.is_improvement(delta)
+        assessment = "improved" if improved else "worsened"
 
         if classification_changed:
             feedback = (
-                f"Your {label.lower()} has changed from {past_class.lower()} "
-                f"({past_val}) to {current_class.lower()} ({current_val}) "
+                f"Your {label.lower()} has changed from "
+                f"{past_class.value.lower()} ({past_val}) to "
+                f"{current_class.value.lower()} ({current_value}) "
                 "since your last record."
             )
         else:
+            moved = "closer to" if improved else "further from"
             feedback = (
                 f"Your {label.lower()} has {direction} from {past_val} "
-                f"to {current_val} since your last record "
-                f"({assessment} - moved {'further from' if assessment == 'worsened' else 'closer to'} "
-                "the typical reference range)."
+                f"to {current_value} since your last record "
+                f"({assessment} - moved {moved} the typical reference "
+                "range)."
             )
 
-        changes.append({
-            "metric": label,
-            "status": "CHANGED",
-            "assessment": assessment,
-            "classification_changed": classification_changed,
-            "previous_classification": past_class,
-            "current_classification": current_class,
-            "feedback": feedback,
-        })
+        return Finding(
+            metric=label,
+            status="CHANGED",
+            assessment=assessment,
+            classification_changed=classification_changed,
+            previous_classification=(past_class.value if past_class else None),
+            current_classification=(current_class.value if current_class else None),
+            feedback=feedback,
+        )
 
-    return changes
+# ===========================================================================
+# Safe  ty guardrail - forward-compatible free-text filter
+# ===========================================================================
 
-
-# Forward-compatible safety utility: ai_manager.py's current output
-# contract is purely numeric (see the module docstring) and contains no
-# free-text AI explanation, so nothing in this pipeline calls this
-# function today. It is kept here, tested and ready, for if/when a
-# future AI-generated explanation field is added - it must be passed
-# through this before ever reaching a user.
-_FORBIDDEN_SINGLE_WORDS = ["diagnose", "disease", "prescribe", "treatment"]
-_FORBIDDEN_PHRASES = ["stop taking", "increase dose", "decrease dose"]
-
-
-# Adding Safety Guardrails
-def enforce_safety_guardrails(ai_explanation: str) -> str:
+class SafetyGuardrail:
     """
     Check free-text AI-generated explanation text for prohibited
     diagnostic/prescriptive language, and reject it wholesale if found.
-
-    Args:
-        ai_explanation: str - free-text explanation from an AI model.
-
-    Returns:
-        `ai_explanation` unchanged if it contains none of the forbidden
-        words/phrases, or a fixed, safe replacement string if it does.
+    Nothing in the current numeric pipeline calls this (ai_manager's
+    output is purely numeric), but it is kept, tested and ready for
+    if/when a future AI-generated explanation field is added - the OOP
+    equivalent of the old enforce_safety_guardrails().
     """
-    if not ai_explanation:
+
+    _FORBIDDEN_SINGLE_WORDS = ["diagnose", "disease", "prescribe", "treatment"]
+    _FORBIDDEN_PHRASES = ["stop taking", "increase dose", "decrease dose"]
+    _OVERRIDE_MESSAGE = (
+        "Safety Override: The AI generated restricted diagnostic "
+        "language. Please discuss these health trends directly with "
+        "your doctor."
+    )
+
+    def enforce(self, ai_explanation: str) -> str:
+        if not ai_explanation:
+            return ai_explanation
+
+        text_lower = ai_explanation.lower()
+
+        for word in self._FORBIDDEN_SINGLE_WORDS:
+            if re.search(r"\b" + re.escape(word) + r"\w*\b", text_lower):
+                return self._OVERRIDE_MESSAGE
+
+        for phrase in self._FORBIDDEN_PHRASES:
+            if phrase in text_lower:
+                return self._OVERRIDE_MESSAGE
+
         return ai_explanation
 
-    text_lower = ai_explanation.lower()
+# ===========================================================================
+# MedicalProfileValidator - standing reference-data validation (own SRP)
+# ===========================================================================
 
-    for word in _FORBIDDEN_SINGLE_WORDS:
-        if re.search(r"\b" + re.escape(word) + r"\w*\b", text_lower):
-            return (
-                "Safety Override: The AI generated restricted diagnostic "
-                "language. Please discuss these health trends directly "
-                "with your doctor."
-            )
-
-    for phrase in _FORBIDDEN_PHRASES:
-        if phrase in text_lower:
-            return (
-                "Safety Override: The AI generated restricted diagnostic "
-                "language. Please discuss these health trends directly "
-                "with your doctor."
-            )
-
-    return ai_explanation
-
-
-def generate_dynamic_summary(
-    recent_changes: List[Dict[str, str]],
-    urgent_findings: List[Dict[str, str]],
-    flagged_trends: List[Dict[str, str]],
-) -> str:
+class MedicalProfileValidator:
     """
-    Build a short, plain-language summary purely from this module's own
-    rule evaluations - never from raw AI-generated text. Because every
-    word here comes from a fixed Python template rather than an LLM,
-    "no diagnosing" is guaranteed structurally, not just by keyword
-    filtering after the fact.
+    Validate and normalise a raw medical-profile dict (medications,
+    blood group, allergies, emergency contacts, hereditary illness).
 
-    Args:
-        recent_changes: output of analyze_recent_changes().
-        urgent_findings: findings from evaluate_health_metrics() with
-            status "URGENT".
-        flagged_trends: findings from evaluate_health_metrics() with
-            status "FLAGGED".
-
-    Returns:
-        A summary string highlighting only significant changes and
-        trends - never a diagnosis, never a treatment suggestion.
+    A separate class from the vital-sign engine because this is
+    user-entered reference data, not a measurement - it gets no
+    thresholds, trend analysis or scoring, only validation. Mirrors the
+    old validate_medical_profile() exactly, including its (cleaned,
+    errors) return and its never-mutate-the-input guarantee.
     """
-    if not recent_changes and not urgent_findings and not flagged_trends:
-        return "All tracked metrics are stable with no notable changes recorded."
 
-    parts = []
+    VALID_BLOOD_GROUPS = ["", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+    VALID_ALLERGY_SEVERITIES = ["mild", "moderate", "severe"]
+    VALID_DOSAGE_UNITS = [
+        "", "mg", "mcg", "g", "ml", "L", "IU", "%",
+        "units", "tablet(s)", "drop(s)", "puff(s)", "patch(es)",
+    ]
+    # Mandatory leading "+" and country code, then digits/spaces/dashes only.
+    _PHONE_RE = re.compile(r"^\+[1-9][0-9 \-]{5,18}$")
 
-    if urgent_findings:
-        urgent_metrics = ", ".join(f["metric"] for f in urgent_findings)
-        parts.append(
-            f"Urgent: {urgent_metrics} at a level that usually warrants "
-            "prompt medical attention"
-        )
-
-    if flagged_trends:
-        flagged_metrics = ", ".join(f["metric"] for f in flagged_trends)
-        parts.append(f"Persistent upward trend detected in: {flagged_metrics}")
-
-    increases = [c["metric"] for c in recent_changes if "increased" in c["feedback"]]
-    decreases = [c["metric"] for c in recent_changes if "decreased" in c["feedback"]]
-
-    if increases:
-        parts.append(f"Increased since last visit: {', '.join(increases)}")
-    if decreases:
-        parts.append(f"Decreased since last visit: {', '.join(decreases)}")
-
-    parts.append("Please discuss these results with your doctor at your next consultation.")
-
-    return " | ".join(parts)
-
-
-def process_ai_record(
-    ai_extracted: Optional[Dict[str, Any]],
-    historical_records: List[Dict[str, Any]],
-) -> Dict[str, Any]:
-    """
-    Main pipeline entry point. Takes ai_manager's raw extraction result
-    (or None) plus the user's stored history, applies all business
-    rules, and returns one finalized report dict ready for data_manager
-    to store and for the UI to display.
-
-    Args:
-        ai_extracted: the dict ai_manager.call_ai_with_retry() returned,
-            or None if the AI Manager could not produce a trustworthy
-            result after retrying.
-        historical_records: list of previously stored health record
-            dicts (see data_manager.load_health_records()), assumed
-            sorted oldest to newest.
-
-    Returns:
-        A dict with "metrics", "ai_extracted_date" (the report's own
-        date as read by the AI Manager, "YYYY-MM-DD" or None - this
-        module never invents a replacement for a None value itself),
-        "urgent_findings", "flagged_trends", "recent_changes",
-        "risk_score", "decision" (one of "NOT_MEDICAL_REPORT",
-        "REJECTED", "URGENT", "FLAGGED", "ACCEPTED"),
-        "recommended_action", "requires_doctor_review", and "summary".
-    """
-    # Deterministic acceptance rule: ai_manager already classified the
-    # uploaded document (in the same extraction call, so no extra
-    # Gemini request was needed for this). If it confidently decided
-    # this isn't a medical report at all, that is rejected here before
-    # any measurement/trend logic runs - an unrelated document (e.g. an
-    # exam timetable) must never reach Health History, Health Trends,
-    # or a consultation summary.
-    if isinstance(ai_extracted, dict) and ai_extracted.get("is_medical_report") is False:
-        reason = ai_extracted.get("classification_reason") or (
-            "The uploaded file does not appear to be a medical report."
-        )
-        return {
-            "metrics": flatten_ai_metrics(None),
-            "ai_extracted_date": None,
-            "urgent_findings": [],
-            "flagged_trends": [],
-            "recent_changes": [],
-            "risk_score": 0,
-            "decision": "NOT_MEDICAL_REPORT",
-            "recommended_action": (
-                "The uploaded file does not appear to be a medical "
-                "report. Please upload a valid medical report "
-                "containing health-related examination or test "
-                "information."
-            ),
-            "requires_doctor_review": False,
-            "summary": reason,
+    def validate(self, profile: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+        errors: List[str] = []
+        cleaned: Dict[str, Any] = {
+            "medications": [],
+            "blood_group": "",
+            "allergies": [],
+            "emergency_contacts": [],
+            "hereditary_illness": {
+                "diabetes": False, "blood_pressure": False,
+                "heart_disease": False, "asthma": False,
+                "other": "", "notes": "",
+            },
         }
 
-    current_metrics = flatten_ai_metrics(ai_extracted)
-    ai_extracted_date = _extract_report_date(ai_extracted)
+        # --- Blood group: must be one of the known groups (blank = unknown) ---
+        blood_group = str(profile.get("blood_group", "")).strip().upper()
+        if blood_group in self.VALID_BLOOD_GROUPS:
+            cleaned["blood_group"] = blood_group
+        else:
+            errors.append(f"'{blood_group}' is not a recognised blood group.")
 
-    if all(value is None for value in current_metrics.values()):
+
+
+        # --- Medications: name required if row isn't fully blank; dosage, ---
+        # --- if given, must be a non-negative number. ---
+        for index, med in enumerate(profile.get("medications", []), start=1):
+            name = str(med.get("name", "")).strip()
+            amount_raw = str(med.get("dosage_amount", "")).strip()
+            if not name and not amount_raw:
+                continue  # fully blank row - skip silently
+            if not name:
+                errors.append(f"Medication {index}: a name is required.")
+                continue
+            amount = None
+            if amount_raw:
+                try:
+                    amount = float(amount_raw)
+                except ValueError:
+                    errors.append(f"Medication '{name}': dosage must be a number.")
+                    continue
+                if amount < 0:
+                    errors.append(f"Medication '{name}': dosage cannot be negative.")
+                    continue
+            unit = str(med.get("dosage_unit", "")).strip()
+            if unit and unit not in self.VALID_DOSAGE_UNITS:
+                errors.append(f"Medication '{name}': '{unit}' is not a recognised dosage unit.")
+                unit = ""
+            cleaned["medications"].append({
+                "name": name,
+                "dosage_amount": amount,
+                "dosage_unit": unit,
+                "frequency": str(med.get("frequency", "")).strip(),
+            })
+
+            # --- Allergies: allergen required; severity, if given, must be known ---
+        for index, allergy in enumerate(profile.get("allergies", []), start=1):
+            allergen = str(allergy.get("allergen", "")).strip()
+            if not allergen:
+                continue
+            severity = str(allergy.get("severity", "")).strip().lower()
+            if severity and severity not in self.VALID_ALLERGY_SEVERITIES:
+                errors.append(
+                    f"Allergy '{allergen}': severity must be mild, moderate or severe."
+                )
+                severity = ""
+            cleaned["allergies"].append({
+                "allergen": allergen,
+                "reaction": str(allergy.get("reaction", "")).strip(),
+                "severity": severity,
+            })
+
+        # --- Emergency contacts: name and a plausible phone number required ---
+        for index, contact in enumerate(profile.get("emergency_contacts", []), start=1):
+            name = str(contact.get("name", "")).strip()
+            phone = str(contact.get("phone", "")).strip()
+            if not name and not phone:
+                continue
+            if not name:
+                errors.append(f"Emergency contact {index}: a name is required.")
+                continue
+            if not phone:
+                errors.append(f"Emergency contact '{name}': a phone number is required.")
+                continue
+            if not self._PHONE_RE.fullmatch(phone):
+                errors.append(
+                    f"Emergency contact '{name}': phone number must include the "
+                    "country code, e.g. +65 1234 5678."
+                )
+                continue
+            cleaned["emergency_contacts"].append({
+                "name": name,
+                "relationship": str(contact.get("relationship", "")).strip(),
+                "phone": phone,
+                "email": str(contact.get("email", "")).strip(),
+            })
+
+        # --- Hereditary illness: force the four flags to booleans, strip text ---
+        hereditary = profile.get("hereditary_illness", {}) or {}
+        for flag in ("diabetes", "blood_pressure", "heart_disease", "asthma"):
+            cleaned["hereditary_illness"][flag] = bool(hereditary.get(flag, False))
+        cleaned["hereditary_illness"]["other"] = str(hereditary.get("other", "")).strip()
+        cleaned["hereditary_illness"]["notes"] = str(hereditary.get("notes", "")).strip()
+
+        return cleaned, errors
+
+# ===========================================================================
+# The engine - LogicManager (replaces process_ai_record)
+# ===========================================================================
+
+class LogicManager:
+    """
+    Orchestrates the business rules over an AI-extracted reading and the
+    user's history, then scores and routes the outcome. Holds its rules
+    by AGGREGATION (passed in, independently reusable) and runs them
+    POLYMORPHICALLY - it never checks a rule's concrete type.
+
+    The single public entry point, process(), keeps the exact same
+    input/output contract as the old logic_manager.process_ai_record(),
+    so data_manager and the IO layer need no changes to consume it.
+    """
+
+    # Specs shared across rules (one per tracked metric), in a fixed,
+    # predictable order matching the old TRACKED_METRICS list.
+    _SPECS = [
+        SystolicBloodPressure(),
+        DiastolicBloodPressure(),
+        BloodGlucose(),
+        HeartRate(),
+    ]
+
+    def __init__(self, rules: List[Rule], guardrail: Optional[SafetyGuardrail] = None):
+        # Aggregation: the rules exist on their own and are handed in.
+        self._rules = list(rules)
+        # Composition: the manager owns its guardrail helper.
+        self._guardrail = guardrail or SafetyGuardrail()
+        self._spec_by_key = {spec.key: spec for spec in self._SPECS}
+
+    @classmethod
+    def default(cls) -> "LogicManager":
+        """
+        Build a LogicManager wired with the project's current rule set.
+        Adding/removing a rule here is the ONLY change needed to change
+        the system's behaviour (OCP) - the engine code below is closed
+        for modification.
+        """
+        rules: List[Rule] = []
+        for spec in cls._SPECS:
+            rules.append(UrgentThresholdRule(spec))
+            rules.append(PersistentTrendRule(spec))
+            rules.append(RecentChangeRule(spec))
+        return cls(rules)
+# ----- shape helpers (same behaviour as the old module functions) -----
+    @staticmethod
+    def _flatten_ai_metrics(ai_extracted: Optional[Dict[str, Any]]) -> Dict[str, Optional[float]]:
+        """Nested AI shape -> flat metric keys. Mirrors flatten_ai_metrics()."""
+        keys = ["blood_pressure_systolic", "blood_pressure_diastolic",
+                "blood_glucose", "heart_rate"]
+        if not isinstance(ai_extracted, dict):
+            return {k: None for k in keys}
+        bp = ai_extracted.get("blood_pressure") or {}
+        return {
+            "heart_rate": ai_extracted.get("heart_rate"),
+            "blood_pressure_systolic": bp.get("systolic"),
+            "blood_pressure_diastolic": bp.get("diastolic"),
+            "blood_glucose": ai_extracted.get("blood_glucose"),
+        }
+
+    @staticmethod
+    def _extract_report_date(ai_extracted: Optional[Dict[str, Any]]) -> Optional[str]:
+        """Mirrors _extract_report_date(): validated 'YYYY-MM-DD' or None."""
+        if not isinstance(ai_extracted, dict):
+            return None
+        report_date = ai_extracted.get("report_date")
+        if not isinstance(report_date, str):
+            return None
+        try:
+            datetime.strptime(report_date, "%Y-%m-%d")
+        except ValueError:
+            return None
+        return report_date
+
+    @staticmethod
+    def _history_values(historical_records: List[Dict[str, Any]], metric: str) -> List[Optional[float]]:
+        """
+        This metric's past readings, oldest to newest, reading from
+        either a flat CLI record or an AI-pipeline record nested under
+        'metrics' - mirrors the old _get_metric_value() per record.
+        """
+        values: List[Optional[float]] = []
+        for record in historical_records:
+            if isinstance(record.get("metrics"), dict):
+                values.append(record["metrics"].get(metric))
+            else:
+                values.append(record.get(metric))
+        return values
+
+    # ----- the polymorphic evaluation loop (the heart of the refactor) ----
+    def evaluate(self, current_metrics: Dict[str, Optional[float]],
+                 historical_records: List[Dict[str, Any]]) -> List[Finding]:
+        """
+        Run every rule over every applicable reading. No type checks on
+        the rules - each is asked, uniformly, to evaluate(). Returns all
+        raised Findings (URGENT / FLAGGED / CHANGED).
+        """
+        findings: List[Finding] = []
+        for rule in self._rules:
+            metric_key = rule.spec.key
+            current_value = current_metrics.get(metric_key)
+            history_values = self._history_values(historical_records, metric_key)
+            finding = rule.evaluate(current_value, history_values)
+            if finding is not None:
+                findings.append(finding)
+        return findings
+
+# ----- scoring / routing (same formula as the old pipeline) -----------
+    @staticmethod
+    def _score(urgent: List[Finding], flagged: List[Finding]) -> int:
+        return len(urgent) * 2 + len(flagged)
+
+    def _summary(self, changes, urgent, flagged) -> str:
+        """Deterministic, template-only summary - mirrors generate_dynamic_summary()."""
+        if not changes and not urgent and not flagged:
+            return "All tracked metrics are stable with no notable changes recorded."
+
+        parts = []
+        if urgent:
+            metrics = ", ".join(f.metric for f in urgent)
+            parts.append(
+                f"Urgent: {metrics} at a level that usually warrants "
+                "prompt medical attention"
+            )
+        if flagged:
+            metrics = ", ".join(f.metric for f in flagged)
+            parts.append(f"Persistent upward trend detected in: {metrics}")
+
+        increases = [c.to_dict() for c in changes if "increased" in c.to_dict()["feedback"]]
+        decreases = [c.to_dict() for c in changes if "decreased" in c.to_dict()["feedback"]]
+        if increases:
+            parts.append("Increased since last visit: "
+                         + ", ".join(c["metric"] for c in increases))
+        if decreases:
+            parts.append("Decreased since last visit: "
+                         + ", ".join(c["metric"] for c in decreases))
+
+        parts.append("Please discuss these results with your doctor at "
+                     "your next consultation.")
+        return " | ".join(parts)
+
+        # ----- single public entry point -------------------------------------
+    def process(self, ai_extracted: Optional[Dict[str, Any]],
+                historical_records: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Main pipeline entry point - the OOP replacement for
+        process_ai_record(). Returns a dict with the identical keys and
+        value shapes the procedural version produced, so stored records
+        and the UI need no changes.
+        """
+        # Deterministic acceptance rule: AI already classified the doc.
+        if isinstance(ai_extracted, dict) and ai_extracted.get("is_medical_report") is False:
+            reason = ai_extracted.get("classification_reason") or (
+                "The uploaded file does not appear to be a medical report."
+            )
+            return {
+                "metrics": self._flatten_ai_metrics(None),
+                "ai_extracted_date": None,
+                "urgent_findings": [],
+                "flagged_trends": [],
+                "recent_changes": [],
+                "risk_score": 0,
+                "decision": Decision.NOT_MEDICAL_REPORT.value,
+                "recommended_action": (
+                    "The uploaded file does not appear to be a medical "
+                    "report. Please upload a valid medical report "
+                    "containing health-related examination or test "
+                    "information."
+                ),
+                "requires_doctor_review": False,
+                "summary": reason,
+            }
+
+        current_metrics = self._flatten_ai_metrics(ai_extracted)
+        ai_extracted_date = self._extract_report_date(ai_extracted)
+
+        if all(value is None for value in current_metrics.values()):
+            return {
+                "metrics": current_metrics,
+                "ai_extracted_date": ai_extracted_date,
+                "urgent_findings": [],
+                "flagged_trends": [],
+                "recent_changes": [],
+                "risk_score": 0,
+                "decision": Decision.REJECTED.value,
+                "recommended_action": (
+                    "No reliable measurements could be extracted from this "
+                    "report. Please try uploading a clearer copy."
+                ),
+                "requires_doctor_review": False,
+                "summary": (
+                    "No usable measurements were extracted from this report."
+                ),
+            }
+
+        findings = self.evaluate(current_metrics, historical_records)
+        urgent = [f for f in findings if f.status == "URGENT"]
+        flagged = [f for f in findings if f.status == "FLAGGED"]
+        changes = [f for f in findings if f.status == "CHANGED"]
+
+        risk_score = self._score(urgent, flagged)
+
+        if urgent:
+            decision = Decision.URGENT
+            recommended_action = (
+                "These readings fall outside typical safe ranges. Consider "
+                "contacting a healthcare professional promptly rather than "
+                "waiting for your next scheduled visit."
+            )
+        elif flagged:
+            decision = Decision.FLAGGED
+            recommended_action = (
+                "Discuss these trends with your doctor at your next "
+                "consultation."
+            )
+        else:
+            decision = Decision.ACCEPTED
+            recommended_action = "No action needed - keep up with regular check-ups."
+
+        summary = self._summary(changes, urgent, flagged)
+
         return {
             "metrics": current_metrics,
             "ai_extracted_date": ai_extracted_date,
-            "urgent_findings": [],
-            "flagged_trends": [],
-            "recent_changes": [],
-            "risk_score": 0,
-            "decision": "REJECTED",
-            "recommended_action": (
-                "No reliable measurements could be extracted from this "
-                "report. Please try uploading a clearer copy."
-            ),
-            "requires_doctor_review": False,
-            "summary": (
-                "No usable measurements were extracted from this report."
-            ),
+            "urgent_findings": [f.to_dict() for f in urgent],
+            "flagged_trends": [f.to_dict() for f in flagged],
+            "recent_changes": [f.to_dict() for f in changes],
+            "risk_score": risk_score,
+            "decision": decision.value,
+            "recommended_action": recommended_action,
+            "requires_doctor_review": bool(urgent or flagged),
+            "summary": summary,
         }
+    
+# ===========================================================================
+# Backwards-compatibility shims
+# ---------------------------------------------------------------------------
+# All real logic above is object-oriented. These thin module-level names
+# are kept only so existing callers (io_gui.py's process_ai_record /
+# validate_medical_profile / METRIC_LABELS usage, and data_manager's
+# docstrings) keep working unchanged. Each just delegates to a class.
+# ===========================================================================
 
-    findings = evaluate_health_metrics(current_metrics, historical_records)
-    urgent_findings = [f for f in findings if f["status"] == "URGENT"]
-    flagged_trends = [f for f in findings if f["status"] == "FLAGGED"]
-    recent_changes = analyze_recent_changes(current_metrics, historical_records)
+# METRIC_LABELS used to be a module-level dict; io_gui.py reads it as
+# logic_manager.METRIC_LABELS.get(key, key). Rebuilt here from the
+# MetricSpec objects so there is still a single source of truth.
+METRIC_LABELS = {spec.key: spec.label for spec in LogicManager._SPECS}
 
-    # A simple, transparent, rule-based score - not a black-box model
-    # output - so it stays easy to explain and audit.
-    risk_score = len(urgent_findings) * 2 + len(flagged_trends)
+# One shared default engine / validator / guardrail for the shims.
+_default_logic_manager = LogicManager.default()
+_default_profile_validator = MedicalProfileValidator()
+_default_guardrail = SafetyGuardrail()
 
-    if urgent_findings:
-        decision = "URGENT"
-        recommended_action = (
-            "These readings fall outside typical safe ranges. Consider "
-            "contacting a healthcare professional promptly rather than "
-            "waiting for your next scheduled visit."
-        )
-    elif flagged_trends:
-        decision = "FLAGGED"
-        recommended_action = "Discuss these trends with your doctor at your next consultation."
-    else:
-        decision = "ACCEPTED"
-        recommended_action = "No action needed - keep up with regular check-ups."
 
-    summary = generate_dynamic_summary(recent_changes, urgent_findings, flagged_trends)
+def process_ai_record(ai_extracted, historical_records):
+    """Backwards-compatible shim -> LogicManager.process()."""
+    return _default_logic_manager.process(ai_extracted, historical_records)
 
-    return {
-        "metrics": current_metrics,
-        "ai_extracted_date": ai_extracted_date,
-        "urgent_findings": urgent_findings,
-        "flagged_trends": flagged_trends,
-        "recent_changes": recent_changes,
-        "risk_score": risk_score,
-        "decision": decision,
-        "recommended_action": recommended_action,
-        "requires_doctor_review": bool(urgent_findings or flagged_trends),
-        "summary": summary,
-    }
+def validate_medical_profile(profile):
+    """Backwards-compatible shim -> MedicalProfileValidator.validate()."""
+    return _default_profile_validator.validate(profile)
 
+
+def enforce_safety_guardrails(ai_explanation):
+    """Backwards-compatible shim -> SafetyGuardrail.enforce()."""
+    return _default_guardrail.enforce(ai_explanation)
 
 # ==========================================
-# DUMMY TEST SCRIPT (Local Execution Only)
+# DEMO (local execution only)
 # ==========================================
 if __name__ == "__main__":
     import json
 
-    # A fresh reading shaped exactly like ai_manager.call_ai_with_retry()
-    # actually returns it (nested blood_pressure) - matches the
-    # "severe" tier of the mock test reports used elsewhere in this
-    # project, so this doubles as an integration sanity check.
     mock_ai_extracted = {
         "heart_rate": 138,
         "blood_pressure": {"systolic": 188, "diastolic": 122},
         "blood_glucose": 15.4,
         "report_date": "2026-09-22",
     }
-
-    # Historical records use the flat key names data_manager actually
-    # stores (see config.SUPPORTED_METRICS), sorted oldest to newest,
-    # with a rising trend leading up to today's reading.
     mock_history = [
         {
             "date": "2026-07-01",
@@ -624,6 +853,7 @@ if __name__ == "__main__":
         },
     ]
 
-    print("--- Simulating an urgent + persistent-trend reading ---")
-    result = process_ai_record(mock_ai_extracted, mock_history)
+    engine = LogicManager.default()
+    print("--- Simulating an urgent + persistent-trend reading (OOP) ---")
+    result = engine.process(mock_ai_extracted, mock_history)
     print(json.dumps(result, indent=4))

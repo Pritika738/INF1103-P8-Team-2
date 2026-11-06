@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 import json
 import os
 import re
@@ -22,6 +22,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import io_manager
 import logic_manager
 import data_manager
+import ai_manager
+
+# One AIManager for the whole app. The real Gemini client is injected
+# here, so everything below depends only on the AIClient interface.
+ai_service = ai_manager.AIManager(ai_manager.GeminiClient())
+
+# One DataManager for the whole app. It reads and writes the real files
+# configured in config.py; tests build their own with temporary files.
+data_service = data_manager.DataManager.create()
 
 st.set_page_config(
     page_title="PASSAY - Health History and Consultation Prep",
@@ -602,7 +611,7 @@ def latest_record_for_user(records):
     Dashboard must show exactly what the latest report says, including
     "Not Available" where it says nothing.
     """
-    latest = data_manager.get_latest_reports(records, limit=1)
+    latest = data_service.get_latest_reports(records, limit=1)
     return latest[0] if latest else None
 
 
@@ -618,7 +627,7 @@ def build_record_trends(records):
     than being worked out again here.
 
     Args:
-        records: list of dicts from data_manager.load_health_records(),
+        records: list of dicts from data_service.load_health_records(),
             already filtered to one user if relevant.
 
     Returns:
@@ -972,6 +981,10 @@ def sidebar_nav():
             go("trends")
         if st.button("Consultation", use_container_width=True):
             go("consultation")
+        if st.button("Medical Profile", use_container_width=True):
+            go("profile")
+        if st.button("Settings", use_container_width=True):      # ← ADD THIS
+            go("settings")                                       # ← ADD THIS
         st.markdown("---")
         if st.button(
             "Log Out",
@@ -1011,6 +1024,18 @@ ALLOWED_FILE_EXTENSIONS = {
 
 MAX_PDF_SIZE_MB = 30
 MAX_IMAGE_SIZE_MB = 10
+
+# Blood groups offered on the Medical Profile page; mirrors
+# logic_manager.VALID_BLOOD_GROUPS (minus the blank "unknown" option,
+# chosen by selecting "Not set").
+BLOOD_GROUP_OPTIONS = ["Not set", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+
+# Dosage units offered on the Medical Profile page; mirrors
+# logic_manager.VALID_DOSAGE_UNITS (blank is a valid, unset choice).
+DOSAGE_UNIT_OPTIONS = [
+    "", "mg", "mcg", "g", "ml", "L", "IU", "%",
+    "units", "tablet(s)", "drop(s)", "puff(s)", "patch(es)",
+]
 
 def validate_username(username: str) -> str:
 
@@ -1209,6 +1234,7 @@ def authenticate_temporary_account(
         account["password_hash"]
     )
 
+<<<<<<< HEAD
 # ---------------------------------------------------------
 # PIN LOGIN PRIMITIVES
 # NOTE: the Commit 4 plan says these already exist; they were not in
@@ -1246,6 +1272,121 @@ def authenticate_with_pin(username: str, pin: str) -> bool:
 
     entered_hash = hash_password(pin, account["pin_salt"])
 
+=======
+# =========================================================
+# QUICK-LOGIN PIN
+# =========================================================
+# A 4-digit PIN is a CONVENIENCE shortcut tied to an existing account,
+# set only after the user has logged in normally at least once - it is
+# NOT a replacement for the username + password. Because a 4-digit PIN
+# is weak by nature (only 10,000 combinations), it is:
+#   - hashed with PBKDF2 + a per-user salt, never stored in plain text
+#     (same scheme as hash_password() above),
+#   - usable only alongside the username (so it is unambiguous across
+#     accounts, since two users could pick the same PIN), and
+#   - rate-limited per session (see PIN_MAX_ATTEMPTS) so it cannot be
+#     brute-forced from the login screen.
+
+PIN_PATTERN = re.compile(r"^\d{4}$")
+PIN_MAX_ATTEMPTS = 5
+
+def validate_pin(pin: str) -> str:
+    """
+    Validate a quick-login PIN. Returns "" if valid, or a human-readable
+    error message if not. A valid PIN is exactly four digits (0-9).
+    """
+    pin = (pin or "").strip()
+    if not pin:
+        return "Please enter a PIN."
+    if not PIN_PATTERN.fullmatch(pin):
+        return "PIN must be exactly 4 digits."
+    return ""
+
+def hash_pin(pin: str, salt_hex: str) -> str:
+    """
+    Hash a PIN with PBKDF2-HMAC-SHA256 and a per-user salt - the same
+    construction as hash_password(), so the stored PIN is never
+    recoverable in plain text.
+    """
+    salt = bytes.fromhex(salt_hex)
+    hashed = hashlib.pbkdf2_hmac(
+        "sha256",
+        pin.encode("utf-8"),
+        salt,
+        PASSWORD_ITERATIONS,
+    )
+    return hashed.hex()
+
+def user_has_pin(username: str) -> bool:
+    """
+    Return True if username has a quick-login PIN set, False otherwise
+    (including when the account does not exist).
+    """
+    account = load_accounts().get(username.strip().lower())
+    return bool(account and account.get("pin_hash") and account.get("pin_salt"))
+
+def set_user_pin(username: str, pin: str) -> bool:
+    """
+    Set (or replace) a user's quick-login PIN, storing only a salted
+    hash of it in their users.json entry. Every OTHER account is left
+    untouched. Returns True on success, False if the account does not
+    exist or the save failed.
+    """
+    username_key = username.strip().lower()
+    accounts = load_accounts()
+    account = accounts.get(username_key)
+    if account is None:
+        return False
+
+    pin_salt = secrets.token_hex(16)
+    account["pin_salt"] = pin_salt
+    account["pin_hash"] = hash_pin(pin, pin_salt)
+    accounts[username_key] = account
+
+    try:
+        save_accounts(accounts)
+        return True
+    except OSError:
+        return False
+
+def remove_user_pin(username: str) -> bool:
+    """
+    Remove a user's quick-login PIN (so they must use their password
+    again). Safe to call when no PIN is set. Returns True on success,
+    False if the account does not exist or the save failed.
+    """
+    username_key = username.strip().lower()
+    accounts = load_accounts()
+    account = accounts.get(username_key)
+    if account is None:
+        return False
+
+    account.pop("pin_salt", None)
+    account.pop("pin_hash", None)
+    accounts[username_key] = account
+
+    try:
+        save_accounts(accounts)
+        return True
+    except OSError:
+        return False
+
+def authenticate_with_pin(username: str, pin: str) -> bool:
+    """
+    Verify a username + quick-login PIN pair against the stored salted
+    PIN hash. Returns False if the account doesn't exist, has no PIN
+    set, or the PIN doesn't match. Uses hmac.compare_digest() to avoid
+    leaking timing information, same as the password check above.
+    """
+    username_key = username.strip().lower()
+    account = load_accounts().get(username_key)
+    if account is None:
+        return False
+    if not (account.get("pin_hash") and account.get("pin_salt")):
+        return False
+
+    entered_hash = hash_pin(pin, account["pin_salt"])
+>>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
     return hmac.compare_digest(entered_hash, account["pin_hash"])
 
 def validate_uploaded_report(
@@ -1416,6 +1557,7 @@ def show_login():
 
                 go("register")
 
+<<<<<<< HEAD
             if st.button(
                 "Quick login with PIN",
                 use_container_width=True,
@@ -1441,27 +1583,67 @@ def show_pin_login():
 
         with st.container(border=True):
 
+=======
+# --- Quick login with PIN -------------------------------------
+        # A convenience shortcut for users who have already set a
+        # 4-digit PIN (see show_settings()). Requires the username too,
+        # so it is unambiguous across accounts, and is rate-limited per
+        # session so it cannot be brute-forced. It never replaces the
+        # password login above - a user without a PIN simply uses that.
+        with st.container(border=True):
+
+            st.subheader("Quick login with PIN")
+            st.caption(
+                "Already set up a PIN? Enter your username and 4-digit "
+                "PIN for faster sign-in."
+            )
+
+>>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
             attempts = st.session_state.get("pin_attempts", 0)
 
             if attempts >= PIN_MAX_ATTEMPTS:
 
                 st.error(
                     "Too many incorrect PIN attempts. Please sign in "
+<<<<<<< HEAD
                     "with your password instead."
+=======
+                    "with your password above."
+>>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
                 )
 
             else:
 
+<<<<<<< HEAD
                 pin_username = st.text_input("Username", key="pin_login_username")
                 pin_value = st.text_input(
                     "4-digit PIN", type="password", max_chars=4, key="pin_login_pin"
                 )
 
                 if st.button("Log In with PIN", type="primary", use_container_width=True):
+=======
+                pin_username = st.text_input(
+                    "Username",
+                    key="pin_login_username",
+                )
+
+                pin_value = st.text_input(
+                    "4-digit PIN",
+                    type="password",
+                    max_chars=4,
+                    key="pin_login_pin",
+                )
+
+                if st.button(
+                    "Log In with PIN",
+                    use_container_width=True,
+                ):
+>>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
 
                     pin_error = validate_pin(pin_value)
 
                     if not pin_username.strip():
+<<<<<<< HEAD
                         st.error("Please enter your username.")
 
                     elif pin_error:
@@ -1480,10 +1662,40 @@ def show_pin_login():
                         if remaining > 0:
                             st.error(
                                 f"Incorrect username or PIN. {remaining} attempt(s) remaining."
+=======
+
+                        st.error("Please enter your username.")
+
+                    elif pin_error:
+
+                        st.error(pin_error)
+
+                    elif authenticate_with_pin(pin_username, pin_value):
+
+                        accounts = load_accounts()
+                        account = accounts[pin_username.strip().lower()]
+
+                        st.session_state.username = account["username"]
+                        st.session_state.email = account["email"]
+                        st.session_state.pop("pin_attempts", None)
+
+                        go("dashboard")
+
+                    else:
+
+                        st.session_state["pin_attempts"] = attempts + 1
+                        remaining = PIN_MAX_ATTEMPTS - st.session_state["pin_attempts"]
+
+                        if remaining > 0:
+                            st.error(
+                                "Incorrect username or PIN. "
+                                f"{remaining} attempt(s) remaining."
+>>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
                             )
                         else:
                             st.error(
                                 "Too many incorrect PIN attempts. Please "
+<<<<<<< HEAD
                                 "sign in with your password instead."
                             )
 
@@ -1491,6 +1703,11 @@ def show_pin_login():
                 st.session_state.pop("pin_attempts", None)
                 go("login")
 
+=======
+                                "sign in with your password above."
+                            )
+
+>>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
 def show_register():
 
     left, mid, right = st.columns([1, 1.4, 1])
@@ -1629,7 +1846,7 @@ def show_dashboard():
     hero("Dashboard", ("Welcome back, " + name + "!") if name else "Your health overview")
 
     # Loaded through the Data Manager - never read the JSON file here.
-    all_records = data_manager.load_health_records()
+    all_records = data_service.load_health_records()
     my_records = records_for_current_user(all_records)
 
     if not my_records:
@@ -1707,6 +1924,217 @@ def show_dashboard():
             unsafe_allow_html=True,
         )
 
+def show_profile():
+    hero("Medical Profile", "Your standing health information, ready for any appointment.")
+
+    username = current_user()
+    profile = data_service.load_medical_profile(username)
+
+    # --- Blood group ---
+    with st.container(border=True):
+        st.subheader("Blood group")
+        current_bg = profile.get("blood_group") or "Not set"
+        bg_index = BLOOD_GROUP_OPTIONS.index(current_bg) if current_bg in BLOOD_GROUP_OPTIONS else 0
+        blood_group_choice = st.selectbox(
+            "Blood group", BLOOD_GROUP_OPTIONS, index=bg_index
+        )
+
+    # --- Medications ---
+    with st.container(border=True):
+        st.subheader("Medications")
+        st.caption("List each current medication, its dose and how often you take it.")
+        med_count = st.number_input(
+            "How many medications?", min_value=0, max_value=20,
+            value=len(profile.get("medications", [])), step=1, key="med_count",
+        )
+        medications = []
+        for i in range(int(med_count)):
+            existing = profile["medications"][i] if i < len(profile.get("medications", [])) else {}
+            st.markdown(f"*Medication {i + 1}*")
+            cols = st.columns([3, 2, 2, 3])
+            with cols[0]:
+                name = st.text_input("Name", value=existing.get("name", ""), key=f"med_name_{i}")
+            with cols[1]:
+                amount = st.text_input("Dose amount", value=str(existing.get("dosage_amount") or ""), key=f"med_amt_{i}")
+            with cols[2]:
+                unit_existing = existing.get("dosage_unit", "")
+                unit_index = DOSAGE_UNIT_OPTIONS.index(unit_existing) if unit_existing in DOSAGE_UNIT_OPTIONS else 0
+                unit = st.selectbox("Unit", DOSAGE_UNIT_OPTIONS, index=unit_index, key=f"med_unit_{i}")
+            with cols[3]:
+                freq = st.text_input("Frequency", value=existing.get("frequency", ""), key=f"med_freq_{i}", placeholder="e.g. twice daily")
+            medications.append({
+                "name": name, "dosage_amount": amount,
+                "dosage_unit": unit, "frequency": freq,
+            })
+
+    # --- Allergies ---
+    with st.container(border=True):
+        st.subheader("Allergies")
+        allergy_count = st.number_input(
+            "How many allergies?", min_value=0, max_value=20,
+            value=len(profile.get("allergies", [])), step=1, key="allergy_count",
+        )
+        allergies = []
+        for i in range(int(allergy_count)):
+            existing = profile["allergies"][i] if i < len(profile.get("allergies", [])) else {}
+            st.markdown(f"*Allergy {i + 1}*")
+            cols = st.columns([3, 3, 2])
+            with cols[0]:
+                allergen = st.text_input("Allergen", value=existing.get("allergen", ""), key=f"alg_name_{i}")
+            with cols[1]:
+                reaction = st.text_input("Reaction", value=existing.get("reaction", ""), key=f"alg_react_{i}", placeholder="e.g. skin/eye")
+            with cols[2]:
+                sev_options = ["", "mild", "moderate", "severe"]
+                sev_existing = str(existing.get("severity", "")).lower()
+                sev_index = sev_options.index(sev_existing) if sev_existing in sev_options else 0
+                severity = st.selectbox("Severity", sev_options, index=sev_index, key=f"alg_sev_{i}")
+            allergies.append({
+                "allergen": allergen, "reaction": reaction, "severity": severity,
+            })
+
+    # --- Emergency contacts ---
+    with st.container(border=True):
+        st.subheader("Emergency contacts")
+        contact_count = st.number_input(
+            "How many contacts?", min_value=0, max_value=10,
+            value=len(profile.get("emergency_contacts", [])), step=1, key="contact_count",
+        )
+        emergency_contacts = []
+        for i in range(int(contact_count)):
+            existing = profile["emergency_contacts"][i] if i < len(profile.get("emergency_contacts", [])) else {}
+            st.markdown(f"*Contact {i + 1}*")
+            cols = st.columns([3, 2, 3, 3])
+            with cols[0]:
+                name = st.text_input("Name", value=existing.get("name", ""), key=f"ec_name_{i}")
+            with cols[1]:
+                relationship = st.text_input("Relationship", value=existing.get("relationship", ""), key=f"ec_rel_{i}", placeholder="e.g. mother")
+            with cols[2]:
+                phone = st.text_input("Phone (with country code)", value=existing.get("phone", ""), key=f"ec_phone_{i}", placeholder="e.g. +65 1234 5678")
+            with cols[3]:
+                email = st.text_input("Email", value=existing.get("email", ""), key=f"ec_email_{i}")
+            emergency_contacts.append({
+                "name": name, "relationship": relationship,
+                "phone": phone, "email": email,
+            })
+
+    # --- Hereditary illness ---
+    with st.container(border=True):
+        st.subheader("Hereditary illness")
+        st.caption("Tick any conditions that run in your family.")
+        hereditary = profile.get("hereditary_illness", {}) or {}
+        cols = st.columns(4)
+        with cols[0]:
+            diabetes = st.checkbox("Diabetes", value=bool(hereditary.get("diabetes")))
+        with cols[1]:
+            blood_pressure = st.checkbox("Blood pressure", value=bool(hereditary.get("blood_pressure")))
+        with cols[2]:
+            heart_disease = st.checkbox("Heart disease", value=bool(hereditary.get("heart_disease")))
+        with cols[3]:
+            asthma = st.checkbox("Asthma", value=bool(hereditary.get("asthma")))
+        other = st.text_input("Other hereditary condition", value=hereditary.get("other", ""))
+        notes = st.text_input("Notes (e.g. which relative)", value=hereditary.get("notes", ""))
+
+    st.write("")
+    if st.button("Save medical profile", type="primary", use_container_width=True):
+        raw_profile = {
+            "blood_group": "" if blood_group_choice == "Not set" else blood_group_choice,
+            "medications": medications,
+            "allergies": allergies,
+            "emergency_contacts": emergency_contacts,
+            "hereditary_illness": {
+                "diabetes": diabetes,
+                "blood_pressure": blood_pressure,
+                "heart_disease": heart_disease,
+                "asthma": asthma,
+                "other": other,
+                "notes": notes,
+            },
+        }
+
+        # Validation stays in the Logic Manager - never recomputed here.
+        cleaned, errors = logic_manager.validate_medical_profile(raw_profile)
+
+        if errors:
+            st.error("Please fix the following before saving:")
+            for message in errors:
+                st.write("• " + message)
+        elif data_service.save_medical_profile(username, cleaned):
+            st.success("Medical profile saved.")
+            st.rerun()
+        else:
+            st.error("Could not save your profile. Please try again.")
+
+def show_settings():
+    hero("Settings", "Manage how you sign in to PASSAY.")
+
+    username = current_user()
+
+    # --- Quick-login PIN -------------------------------------------------
+    with st.container(border=True):
+        st.subheader("Quick-login PIN")
+        has_pin = user_has_pin(username)
+
+        if has_pin:
+            st.caption(
+                "A 4-digit PIN is currently set. You can use it with your "
+                "username on the login screen for faster sign-in. Set a new "
+                "one below to replace it, or remove it entirely."
+            )
+            st.markdown(
+                severity_badge("info") + " &nbsp; "
+                "<span style='color:var(--text-muted);font-size:0.88rem;'>"
+                "PIN is active for this account.</span>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption(
+                "Set a 4-digit PIN to sign in faster next time. You'll "
+                "still enter your username with it. A PIN is a convenience "
+                "shortcut - keep using your password if you prefer."
+            )
+
+        st.write("")
+
+        new_pin = st.text_input(
+            "New 4-digit PIN", type="password", max_chars=4, key="settings_new_pin"
+        )
+        confirm_pin = st.text_input(
+            "Confirm PIN", type="password", max_chars=4, key="settings_confirm_pin"
+        )
+
+        cols = st.columns(2)
+        with cols[0]:
+            if st.button(
+                "Change PIN" if has_pin else "Set PIN",
+                type="primary",
+                use_container_width=True,
+            ):
+                pin_error = validate_pin(new_pin)
+                if pin_error:
+                    st.error(pin_error)
+                elif new_pin != confirm_pin:
+                    st.error("The two PINs do not match.")
+                elif set_user_pin(username, new_pin):
+                    st.success("Your quick-login PIN has been saved.")
+                    st.rerun()
+                else:
+                    st.error("Could not save your PIN. Please try again.")
+
+        with cols[1]:
+            if has_pin:
+                if st.button("Remove PIN", use_container_width=True):
+                    if remove_user_pin(username):
+                        st.success("Your quick-login PIN has been removed.")
+                        st.rerun()
+                    else:
+                        st.error("Could not remove your PIN. Please try again.")
+
+    st.caption(
+        "Security note: a 4-digit PIN is a convenience shortcut, not a "
+        "replacement for your password. It is stored only as a salted hash, "
+        "never in plain text, and is locked after several wrong attempts."
+    )
+    
 def show_upload():
 
     hero(
@@ -1910,12 +2338,17 @@ def show_upload():
             ".jpeg"
         }
 
+        # Tracks whether the file *combination* (not yet each file's own
+        # content) is one AI Analysis is allowed to run on below.
+        combo_valid = True
+
         # More than one PDF is not allowed
         if pdf_count > 1:
 
             st.error(
                 "Please upload only one PDF at a time."
             )
+            combo_valid = False
 
         # PDF cannot be mixed with images
         elif (
@@ -1927,6 +2360,7 @@ def show_upload():
                 "Please upload either one PDF OR one or more "
                 "image pages of the same report, not both."
             )
+            combo_valid = False
 
         # Multiple files must all be images
         elif (
@@ -1941,6 +2375,7 @@ def show_upload():
                 "Multiple-file upload is only supported "
                 "for PNG, JPG or JPEG images."
             )
+            combo_valid = False
 
         # -------------------------------------------------
         # SHOW SELECTED FILES
@@ -1969,286 +2404,201 @@ def show_upload():
 
         st.write("")
 
-
-
-        # -------------------------------------------------
-        # VALIDATION
-        # -------------------------------------------------
-
-        if st.button(
-            "Validate Medical Report",
-            type="primary",
-            use_container_width=True
-        ):
-
-            if not uploaded_files:
-
-                st.error(
-                    "Please select a medical report."
-                )
-
-            else:
-
-                extensions = [
-                    Path(file.name).suffix.lower()
-                    for file in uploaded_files
-                ]
-
-                pdf_count = extensions.count(".pdf")
-
-                image_extensions = {
-                    ".png",
-                    ".jpg",
-                    ".jpeg"
-                }
-
-                # More than one PDF is not one report submission
-                if pdf_count > 1:
-
-                    st.error(
-                        "Please upload only one PDF at a time."
-                    )
-
-                # PDF cannot be mixed with image pages
-                elif (
-                    pdf_count == 1
-                    and len(uploaded_files) > 1
-                ):
-
-                    st.error(
-                        "Please upload either one PDF OR multiple "
-                        "image pages of the same report, not both."
-                    )
-
-                # Multiple files must all be images
-                elif (
-                    len(uploaded_files) > 1
-                    and not all(
-                        extension in image_extensions
-                        for extension in extensions
-                    )
-                ):
-
-                    st.error(
-                        "Multiple-file upload is only supported "
-                        "for PNG, JPG or JPEG pages belonging "
-                        "to the same medical report."
-                    )
-
-                else:
-
-                    validated_pages = []
-                    errors = []
-
-                    for uploaded_file in uploaded_files:
-
-                        valid, message = validate_uploaded_report(
-                            uploaded_file
-                        )
-
-                        if valid:
-
-                            validated_pages.append(
-                                {
-                                    "name": uploaded_file.name,
-                                    "mime_type": uploaded_file.type,
-                                    "size": uploaded_file.size,
-                                    "bytes": uploaded_file.getvalue()
-                                }
-                            )
-
-                        else:
-
-                            errors.append(
-                                f"{uploaded_file.name}: {message}"
-                            )
-
-                    if errors:
-
-                        st.error(
-                            "Some uploaded files failed validation:"
-                        )
-
-                        for error in errors:
-                            st.write(f"• {error}")
-
-                    else:
-
-                        st.session_state["validated_report"] = {
-                            "date_precision":
-                                report_date_info["date_precision"],
-
-                            "date":
-                                report_date_info["date"],
-
-                            "year":
-                                report_date_info["year"],
-
-                            "pages":
-                                validated_pages
-                        }
-
-                        st.success(
-                            "Medical report passed input validation."
-                        )
-
-                        if len(validated_pages) > 1:
-
-                            st.info(
-                                f"{len(validated_pages)} image pages "
-                                "were recognised as one medical report."
-                            )
-
-                        else:
-
-                            st.info(
-                                "The report is ready for AI analysis."
-                            )
-
     # -------------------------------------------------
     # AI / LOGIC / DATA MANAGER PIPELINE
     # -------------------------------------------------
-    # Only shown once a report has passed input validation above.
-    # This block never talks to Gemini directly, never applies
+    # Clicking "Analyze with AI" below now does everything in one step:
+    # basic technical file checks (format/size/readability, the same
+    # checks a separate "Validate Medical Report" button used to run
+    # first), then the AI Manager pipeline. There is no longer a
+    # separate validated-report gate the user has to pass through
+    # first - this block never talks to Gemini directly, never applies
     # business-rule thresholds itself, and never writes JSON itself -
     # it only calls into io_manager -> ai_manager -> logic_manager ->
     # data_manager, exactly as the architecture requires.
 
-    validated = st.session_state.get("validated_report")
+    st.write("")
 
-    if validated:
+    with st.container(border=True):
 
-        st.write("")
+        st.subheader("AI Analysis")
 
-        with st.container(border=True):
-
-            st.subheader("AI Analysis")
-
-            first_page = validated["pages"][0]
-
+        if uploaded_files:
             st.caption(
-                f"Ready to analyse: {first_page['name']}"
+                f"Ready to analyse: {uploaded_files[0].name}"
                 + (
-                    f" (plus {len(validated['pages']) - 1} more page(s) - "
+                    f" (plus {len(uploaded_files) - 1} more page(s) - "
                     "only the first page is sent for AI analysis today)"
-                    if len(validated["pages"]) > 1
+                    if len(uploaded_files) > 1
                     else ""
                 )
             )
+        else:
+            st.caption("Upload a medical report above, then click Analyze with AI.")
 
-            if st.button(
-                "Analyze with AI",
-                type="primary",
-                use_container_width=True,
-            ):
+        if st.button(
+            "Analyze with AI",
+            type="primary",
+            use_container_width=True,
+        ):
 
-                with st.spinner("Sending report to the AI Manager..."):
-                    ai_extracted = io_manager.process_uploaded_report(
-                        first_page["bytes"], first_page["mime_type"]
+            if not uploaded_files:
+
+                st.error("Please select a medical report.")
+
+            elif not combo_valid:
+
+                # The specific reason (too many PDFs, mixed PDF/image
+                # pages, etc.) is already shown above, live, as soon as
+                # it became true - nothing further to add here.
+                pass
+
+            else:
+
+                validated_pages = []
+                errors = []
+
+                for uploaded_file in uploaded_files:
+
+                    valid, message = validate_uploaded_report(
+                        uploaded_file
                     )
 
-                    all_records = data_manager.load_health_records()
-                    user_records = records_for_current_user(all_records)
+                    if valid:
 
-                    processed_record = logic_manager.process_ai_record(
-                        ai_extracted, user_records
+                        validated_pages.append(
+                            {
+                                "name": uploaded_file.name,
+                                "mime_type": uploaded_file.type,
+                                "size": uploaded_file.size,
+                                "bytes": uploaded_file.getvalue()
+                            }
+                        )
+
+                    else:
+
+                        errors.append(
+                            f"{uploaded_file.name}: {message}"
+                        )
+
+                if errors:
+
+                    st.error(
+                        "Some uploaded files failed validation:"
                     )
 
-                if processed_record["decision"] == "NOT_MEDICAL_REPORT":
-
-                    st.error("**Invalid Medical Report**")
-                    st.write(processed_record["recommended_action"])
-                    if processed_record["summary"]:
-                        st.caption(processed_record["summary"])
-
-                elif processed_record["decision"] == "REJECTED":
-
-                    st.error(processed_record["recommended_action"])
+                    for error in errors:
+                        st.write(f"• {error}")
 
                 else:
 
-                    record_to_save = dict(processed_record)
-                    record_to_save["username"] = current_user()
+                    first_page = validated_pages[0]
 
-                    # Decide the final report date. The AI Manager's own
-                    # reading of the date PRINTED ON THE REPORT (via
-                    # logic_manager's "ai_extracted_date") is preferred
-                    # over the user's manual date-picker selection, since
-                    # it reflects what the document itself actually says
-                    # - the manual date is only a fallback for when
-                    # Gemini could not confidently identify one (it is
-                    # told to return null rather than guess).
-                    ai_date = processed_record.get("ai_extracted_date")
-                    if ai_date:
-                        record_to_save["date"] = ai_date
-                        date_source = "detected automatically from the report"
-                    elif validated["date_precision"] == "exact" and validated["date"]:
-                        record_to_save["date"] = validated["date"]
-                        date_source = "the date you entered"
+                    with st.spinner("Sending report to the AI Manager..."):
+                        ai_extracted = ai_service.extract_report(
+                            first_page["bytes"], first_page["mime_type"]
+                        )
+
+                        all_records = data_service.load_health_records()
+                        user_records = records_for_current_user(all_records)
+
+                        processed_record = logic_manager.process_ai_record(
+                            ai_extracted, user_records
+                        )
+
+                    if processed_record["decision"] == "NOT_MEDICAL_REPORT":
+
+                        st.error("**Invalid Medical Report**")
+                        st.write(processed_record["recommended_action"])
+                        if processed_record["summary"]:
+                            st.caption(processed_record["summary"])
+
+                    elif processed_record["decision"] == "REJECTED":
+
+                        st.error(processed_record["recommended_action"])
+
                     else:
-                        date_source = (
-                            "today's date - no report date could be "
-                            "detected or entered"
-                        )
 
-                    # Archive the ORIGINAL uploaded file, byte-for-byte,
-                    # separately from the extracted values above, and
-                    # link the two via report_id. If this archiving step
-                    # fails, the extracted health data is still saved
-                    # below - losing the backup copy of the original
-                    # file shouldn't also block the user's health data.
-                    original_entry = data_manager.save_original_report(
-                        file_bytes=first_page["bytes"],
-                        original_filename=first_page["name"],
-                        mime_type=first_page["mime_type"],
-                        report_date=record_to_save.get("date"),
-                        username=current_user(),
-                    )
-                    if original_entry:
-                        record_to_save["report_id"] = original_entry["report_id"]
-                    else:
-                        st.warning(
-                            "Your extracted results were processed, but the "
-                            "original file could not be archived for Health "
-                            "History."
-                        )
+                        record_to_save = dict(processed_record)
+                        record_to_save["username"] = current_user()
 
-                    saved = data_manager.save_record(record_to_save)
+                        # Decide the final report date. The AI Manager's own
+                        # reading of the date PRINTED ON THE REPORT (via
+                        # logic_manager's "ai_extracted_date") is preferred
+                        # over the user's manual date-picker selection, since
+                        # it reflects what the document itself actually says
+                        # - the manual date is only a fallback for when
+                        # Gemini could not confidently identify one (it is
+                        # told to return null rather than guess).
+                        ai_date = processed_record.get("ai_extracted_date")
+                        if ai_date:
+                            record_to_save["date"] = ai_date
+                            date_source = "detected automatically from the report"
+                        elif report_date_info["date_precision"] == "exact" and report_date_info["date"]:
+                            record_to_save["date"] = report_date_info["date"]
+                            date_source = "the date you entered"
+                        else:
+                            date_source = (
+                                "today's date - no report date could be "
+                                "detected or entered"
+                            )
 
-                    if not saved:
-                        st.error(
-                            "The report was processed but could not be "
-                            "saved. Please try again."
+                        # Archive the ORIGINAL uploaded file, byte-for-byte,
+                        # separately from the extracted values above, and
+                        # link the two via report_id. If this archiving step
+                        # fails, the extracted health data is still saved
+                        # below - losing the backup copy of the original
+                        # file shouldn't also block the user's health data.
+                        original_entry = data_service.save_original_report(
+                            file_bytes=first_page["bytes"],
+                            original_filename=first_page["name"],
+                            mime_type=first_page["mime_type"],
+                            report_date=record_to_save.get("date"),
+                            username=current_user(),
                         )
-                    else:
-                        severity = DECISION_SEVERITY.get(
-                            processed_record["decision"], "info"
-                        )
-                        st.markdown(
-                            severity_badge(severity), unsafe_allow_html=True
-                        )
-                        st.success("Report processed and saved.")
-                        st.caption(
-                            f"Report date: {record_to_save.get('date', 'Unknown')} "
-                            f"({date_source})."
-                        )
-                        st.write(processed_record["summary"])
+                        if original_entry:
+                            record_to_save["report_id"] = original_entry["report_id"]
+                        else:
+                            st.warning(
+                                "Your extracted results were processed, but the "
+                                "original file could not be archived for Health "
+                                "History."
+                            )
 
-                        extracted_metrics = processed_record["metrics"]
-                        metric_rows = [
-                            {
-                                "Measurement": logic_manager.METRIC_LABELS.get(key, key),
-                                "Value": (
-                                    f"{value} {METRIC_UNITS.get(key, '')}".strip()
-                                    if value is not None
-                                    else "Not Available"
-                                ),
-                            }
-                            for key, value in extracted_metrics.items()
-                        ]
-                        st.table(metric_rows)
+                        saved = data_service.save_record(record_to_save)
 
-                        del st.session_state["validated_report"]
+                        if not saved:
+                            st.error(
+                                "The report was processed but could not be "
+                                "saved. Please try again."
+                            )
+                        else:
+                            severity = DECISION_SEVERITY.get(
+                                processed_record["decision"], "info"
+                            )
+                            st.markdown(
+                                severity_badge(severity), unsafe_allow_html=True
+                            )
+                            st.success("Report processed and saved.")
+                            st.caption(
+                                f"Report date: {record_to_save.get('date', 'Unknown')} "
+                                f"({date_source})."
+                            )
+                            st.write(processed_record["summary"])
+
+                            extracted_metrics = processed_record["metrics"]
+                            metric_rows = [
+                                {
+                                    "Measurement": logic_manager.METRIC_LABELS.get(key, key),
+                                    "Value": (
+                                        f"{value} {METRIC_UNITS.get(key, '')}".strip()
+                                        if value is not None
+                                        else "Not Available"
+                                    ),
+                                }
+                                for key, value in extracted_metrics.items()
+                            ]
+                            st.table(metric_rows)
 
 
 def show_history():
@@ -2256,10 +2606,10 @@ def show_history():
 
     # Give any record saved before record_id existed one now, so it can
     # be found and corrected below. A no-op write when nothing's missing.
-    data_manager.backfill_record_ids()
+    data_service.backfill_record_ids()
 
     # Loaded through the Data Manager - never read the JSON file here.
-    all_records = data_manager.load_health_records()
+    all_records = data_service.load_health_records()
     my_records = records_for_current_user(all_records)
 
     if not my_records:
@@ -2332,7 +2682,7 @@ def show_history():
             new_date = st.date_input("Correct report date", value=date.today())
 
             if st.button("Update Date"):
-                if data_manager.update_record_date(selected_id, new_date.isoformat()):
+                if data_service.update_record_date(selected_id, new_date.isoformat()):
                     st.success("Date updated.")
                     st.rerun()
                 else:
@@ -2344,7 +2694,7 @@ def show_history():
             # the user explicitly confirms - this never overwrites a
             # date on its own.
             original_entry = (
-                data_manager.get_original_report_by_id(selected_record["report_id"])
+                data_service.get_original_report_by_id(selected_record["report_id"])
                 if selected_record and selected_record.get("report_id")
                 else None
             )
@@ -2353,11 +2703,11 @@ def show_history():
                 st.write("")
                 if st.button("Detect date from original file with AI"):
                     with st.spinner("Asking the AI Manager to re-read the report date..."):
-                        original_bytes = data_manager.get_original_report_bytes(
+                        original_bytes = data_service.get_original_report_bytes(
                             original_entry["stored_filename"]
                         )
                         ai_extracted = (
-                            io_manager.process_uploaded_report(
+                            ai_service.extract_report(
                                 original_bytes,
                                 original_entry.get("mime_type", "application/pdf"),
                             )
@@ -2377,7 +2727,7 @@ def show_history():
                 if detected_key in st.session_state:
                     st.info(f"AI detected report date: {st.session_state[detected_key]}")
                     if st.button("Use this detected date"):
-                        if data_manager.update_record_date(
+                        if data_service.update_record_date(
                             selected_id, st.session_state[detected_key]
                         ):
                             del st.session_state[detected_key]
@@ -2404,7 +2754,7 @@ def show_history():
     st.divider()
     st.subheader("Original Medical Reports")
 
-    original_reports = data_manager.list_original_reports(current_user())
+    original_reports = data_service.list_original_reports(current_user())
 
     if not original_reports:
         st.caption("Original files you upload will be archived here.")
@@ -2419,7 +2769,7 @@ def show_history():
                 with cols[2]:
                     st.caption(entry.get("filename", ""))
                 with cols[3]:
-                    file_bytes = data_manager.get_original_report_bytes(entry["stored_filename"])
+                    file_bytes = data_service.get_original_report_bytes(entry["stored_filename"])
                     if file_bytes:
                         st.download_button(
                             "Download",
@@ -2459,7 +2809,7 @@ def show_trends():
     )
 
     # Loaded through the Data Manager - never read the JSON file here.
-    all_records = data_manager.load_health_records()
+    all_records = data_service.load_health_records()
     my_records = records_for_current_user(all_records)
 
     # No records yet
@@ -2490,7 +2840,7 @@ def show_trends():
     # Active trend analysis only uses the latest N report dates (see
     # config.LATEST_REPORTS_LIMIT) - Health History still shows every
     # report regardless, since it loads my_records directly, not this.
-    recent_records = data_manager.get_latest_reports(my_records)
+    recent_records = data_service.get_latest_reports(my_records)
 
     # Grouped and classified by logic_manager's own stored evaluation -
     # not recomputed in this file. See build_record_trends().
@@ -2612,10 +2962,14 @@ def show_consultation():
     # Give any record saved before record_id existed one now - this
     # page's automatic-save idempotency check below depends on every
     # record having one (see source_record_id further down).
+<<<<<<< HEAD
     data_manager.backfill_record_ids()
+=======
+    data_service.backfill_record_ids()
+>>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
 
     # Loaded through the Data Manager - never read the JSON file here.
-    all_records = data_manager.load_health_records()
+    all_records = data_service.load_health_records()
     my_records = records_for_current_user(all_records)
 
     if not my_records:
@@ -2627,7 +2981,7 @@ def show_consultation():
     # Consultation preparation only uses the latest N report dates (see
     # config.LATEST_REPORTS_LIMIT) - Health History still shows every
     # report regardless, since it loads my_records directly, not this.
-    recent_records = data_manager.get_latest_reports(my_records)
+    recent_records = data_service.get_latest_reports(my_records)
     trends = build_record_trends(recent_records)
 
     # The AI Manager only ever phrases logic_manager's own already-
@@ -2649,7 +3003,7 @@ def show_consultation():
     ai_narrative = None
     if latest_processed_record:
         with st.spinner("Preparing your consultation summary..."):
-            ai_narrative = io_manager.generate_consultation_summary(latest_processed_record)
+            ai_narrative = ai_service.generate_narrative(latest_processed_record)
 
     report = build_report(who, trends, ai_narrative)
 
@@ -2700,11 +3054,19 @@ def show_consultation():
         # latest record (a refresh, clicking Download above, navigating
         # away and back) never create a duplicate entry; a genuinely
         # new latest record (a new upload) gets its own new entry.
+<<<<<<< HEAD
         existing_entry = data_manager.find_consultation_pdf_by_source(
             current_user(), source_record_id
         )
         if not existing_entry:
             saved_entry = data_manager.save_consultation_pdf(
+=======
+        existing_entry = data_service.find_consultation_pdf_by_source(
+            current_user(), source_record_id
+        )
+        if not existing_entry:
+            saved_entry = data_service.save_consultation_pdf(
+>>>>>>> dd91da81914a89e23a95d3feaab1ef25676b8a1d
                 pdf_bytes=pdf_bytes,
                 report_date=report_date,
                 username=current_user(),
@@ -2722,7 +3084,7 @@ def show_consultation():
     st.divider()
     st.subheader("Summary History")
 
-    saved_summaries = data_manager.list_consultation_pdfs(current_user())
+    saved_summaries = data_service.list_consultation_pdfs(current_user())
 
     if not saved_summaries:
         st.caption("Summaries you save will appear here for later download.")
@@ -2736,7 +3098,7 @@ def show_consultation():
                 with cols[1]:
                     st.caption(f"Generated {_format_summary_timestamp(entry.get('generated_at'))}")
                 with cols[2]:
-                    pdf_data = data_manager.get_consultation_pdf_bytes(entry["filename"])
+                    pdf_data = data_service.get_consultation_pdf_bytes(entry["filename"])
                     if pdf_data:
                         st.download_button(
                             "Download",
@@ -2892,5 +3254,11 @@ else:
     elif st.session_state.page == "consultation":
         show_consultation()
 
+    elif st.session_state.page == "profile":
+        show_profile()
+
+    elif st.session_state.page == "settings":    # ← ADD THIS
+        show_settings() 
+                                  # ← ADD THIS
     else:
         show_dashboard()

@@ -1,618 +1,527 @@
 """
 tests/test_ai_manager.py
 
-Unit and reliability tests for ai_manager.py (P1's build_prompt()/call_ai(),
-and P2's parse_response()/validate_schema()/verify_source()/
-call_ai_with_retry()).
-
-These tests never make a real network call to Gemini. Every call to
-config.get_api_key() and the google-genai client is replaced with a fake
-(mocked) version, so the tests run instantly, for free, and produce the
-same result every time regardless of whether a real GEMINI_API_KEY is
-configured on the machine running them.
+Tests for the AI Manager and the ai_layer package. No live API is used:
+GeminiClient is tested with the Google SDK patched out, and AIManager is
+tested with MockAIClient, which returns scripted replies.
 
 Run with:
-    pytest tests/test_ai_manager.py
+    python -m pytest tests/test_ai_manager.py
 """
 
 import json
-import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 from google.genai import errors as genai_errors
 
-# ai_manager.py lives in the project root, one directory above this file.
-# Insert that directory into sys.path so "import ai_manager" works no
-# matter which directory pytest/unittest is invoked from.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from ai_layer import (
+    AIClient, AIServiceError, AITask, ExtractionTask, GeminiClient,
+    MockAIClient, NarrativeTask, ResponseParser, RetryPolicy, VerificationTask,
+)
+from ai_layer.prompts import PromptBuilder
+from ai_manager import AIManager
 
-import ai_manager
-
-
-# ---------------------------------------------------------------------------
-# Shared test data / helpers
-# ---------------------------------------------------------------------------
-
-VALID_RESPONSE_ALL_NULL = json.dumps({
-    "is_medical_report": True,
-    "classification_reason": "Document appears to be a medical report.",
-    "heart_rate": None,
-    "blood_pressure": None,
-    "blood_glucose": None,
-    "report_date": None,
-})
-
-# The exact dict shape VALID_RESPONSE_ALL_NULL parses to - call_ai_with_retry()
-# returns this whole dict (not just the four measurement fields) on success.
-PARSED_RESPONSE_ALL_NULL = json.loads(VALID_RESPONSE_ALL_NULL)
-
-NOT_A_MEDICAL_REPORT_RESPONSE = json.dumps({
-    "is_medical_report": False,
-    "classification_reason": "Contains an exam timetable, no clinical content.",
-    "heart_rate": None,
-    "blood_pressure": None,
-    "blood_glucose": None,
-    "report_date": None,
-})
-
-INVALID_RESPONSE = "Sure, here's the data you asked for: heart rate is 72"
-
-
-def _make_fake_gemini_response(text):
-    """Build a fake Gemini response object with just a `.text` attribute."""
-    fake_response = MagicMock()
-    fake_response.text = text
-    return fake_response
+PDF = "application/pdf"
+INVALID = "Sure, here's the data you asked for: heart rate is 72"
 
 
 # ---------------------------------------------------------------------------
-# Unit tests: parse_response()
+# Sample AI replies
 # ---------------------------------------------------------------------------
 
-def test_parse_response_accepts_valid_json_object():
-    raw = (
-        '{"heart_rate": 72, "blood_pressure": '
-        '{"systolic": 120, "diastolic": 80}, "blood_glucose": null}'
-    )
-    assert ai_manager.parse_response(raw) == {
-        "heart_rate": 72,
-        "blood_pressure": {"systolic": 120, "diastolic": 80},
-        "blood_glucose": None,
-    }
-
-
-def test_parse_response_rejects_malformed_json_without_crashing():
-    assert ai_manager.parse_response(INVALID_RESPONSE) is None
-
-
-def test_parse_response_rejects_json_that_is_not_an_object():
-    # "[1, 2, 3]" is valid JSON, but it's a list, not the object we need.
-    assert ai_manager.parse_response("[1, 2, 3]") is None
-
-
-def test_parse_response_rejects_non_string_input():
-    assert ai_manager.parse_response(None) is None
-
-
-# ---------------------------------------------------------------------------
-# Unit tests: validate_schema()
-# ---------------------------------------------------------------------------
-
-# Spread into every fixture below so each test only has to spell out the
-# fields it actually cares about varying.
-_BASE_CLASSIFICATION = {
-    "is_medical_report": True,
-    "classification_reason": "Document appears to be a medical report.",
-}
-
-
-def test_validate_schema_accepts_fully_valid_response():
-    response = {
-        **_BASE_CLASSIFICATION,
-        "heart_rate": 72,
-        "blood_pressure": {"systolic": 120, "diastolic": 80},
-        "blood_glucose": 5.5,
-        "report_date": "2026-10-10",
-    }
-    assert ai_manager.validate_schema(response) is True
-
-
-def test_validate_schema_accepts_null_for_genuinely_missing_measurement():
-    # The key IS present here - a null VALUE means "the report really
-    # doesn't contain this measurement", which is valid by design.
-    response = {
-        **_BASE_CLASSIFICATION,
-        "heart_rate": 72,
-        "blood_pressure": {"systolic": 120, "diastolic": 80},
-        "blood_glucose": None,
-        "report_date": "2026-10-10",
-    }
-    assert ai_manager.validate_schema(response) is True
-
-
-def test_validate_schema_rejects_completely_missing_key():
-    # blood_glucose is missing entirely here - different from being
-    # present with a null value (see test above).
-    response = {
-        **_BASE_CLASSIFICATION,
-        "heart_rate": 72,
-        "blood_pressure": {"systolic": 120, "diastolic": 80},
-        "report_date": "2026-10-10",
-    }
-    assert ai_manager.validate_schema(response) is False
-
-
-def test_validate_schema_rejects_unexpected_extra_key():
-    response = {
-        **_BASE_CLASSIFICATION,
-        "heart_rate": 72,
-        "blood_pressure": {"systolic": 120, "diastolic": 80},
-        "blood_glucose": None,
-        "report_date": "2026-10-10",
-        "diagnosis": "possible hypertension",
-    }
-    assert ai_manager.validate_schema(response) is False
-
-
-def test_validate_schema_rejects_wrong_type_for_heart_rate():
-    response = {
-        **_BASE_CLASSIFICATION,
-        "heart_rate": ["72"],
-        "blood_pressure": {"systolic": 120, "diastolic": 80},
-        "blood_glucose": None,
-        "report_date": "2026-10-10",
-    }
-    assert ai_manager.validate_schema(response) is False
-
-
-def test_validate_schema_accepts_null_blood_pressure():
-    response = {
-        **_BASE_CLASSIFICATION,
-        "heart_rate": 72,
-        "blood_pressure": None,
-        "blood_glucose": 5.5,
-        "report_date": "2026-10-10",
-    }
-    assert ai_manager.validate_schema(response) is True
-
-
-def test_validate_schema_rejects_blood_pressure_missing_diastolic():
-    response = {
-        **_BASE_CLASSIFICATION,
-        "heart_rate": 72,
-        "blood_pressure": {"systolic": 120},
-        "blood_glucose": None,
-        "report_date": "2026-10-10",
-    }
-    assert ai_manager.validate_schema(response) is False
-
-
-def test_validate_schema_rejects_boolean_disguised_as_number():
-    # bool is a subclass of int in Python - True/False must not be
-    # mistaken for a valid numeric measurement.
-    response = {
-        **_BASE_CLASSIFICATION,
-        "heart_rate": True,
-        "blood_pressure": None,
-        "blood_glucose": None,
-        "report_date": None,
-    }
-    assert ai_manager.validate_schema(response) is False
-
-
-def test_validate_schema_rejects_non_dict_input():
-    assert ai_manager.validate_schema(None) is False
-    assert ai_manager.validate_schema(["not", "a", "dict"]) is False
-
-
-# ---------------------------------------------------------------------------
-# Unit tests: validate_schema() - document classification (is_medical_report)
-# ---------------------------------------------------------------------------
-
-def test_validate_schema_accepts_confident_non_medical_classification():
-    # A confident "this is not a medical report" answer is itself a
-    # structurally valid response - rejection is decided later, by
-    # call_ai_with_retry()/logic_manager, not by validate_schema().
-    response = {
-        "is_medical_report": False,
-        "classification_reason": "Contains an exam timetable, not a medical report.",
-        "heart_rate": None,
-        "blood_pressure": None,
-        "blood_glucose": None,
-        "report_date": None,
-    }
-    assert ai_manager.validate_schema(response) is True
-
-
-def test_validate_schema_rejects_missing_is_medical_report_key():
-    response = {
-        "classification_reason": "Looks like a medical report.",
-        "heart_rate": 72,
-        "blood_pressure": None,
-        "blood_glucose": None,
-        "report_date": None,
-    }
-    assert ai_manager.validate_schema(response) is False
-
-
-def test_validate_schema_rejects_non_boolean_is_medical_report():
-    response = {
-        **_BASE_CLASSIFICATION,
-        "is_medical_report": "yes",
-        "heart_rate": 72,
-        "blood_pressure": None,
-        "blood_glucose": None,
-        "report_date": None,
-    }
-    assert ai_manager.validate_schema(response) is False
-
-
-def test_validate_schema_rejects_empty_classification_reason():
-    response = {
-        "is_medical_report": True,
-        "classification_reason": "   ",
-        "heart_rate": 72,
-        "blood_pressure": None,
-        "blood_glucose": None,
-        "report_date": None,
-    }
-    assert ai_manager.validate_schema(response) is False
-
-
-# ---------------------------------------------------------------------------
-# Unit tests: validate_schema() - report_date specifically
-# ---------------------------------------------------------------------------
-
-def test_validate_schema_accepts_null_report_date():
-    response = {
-        **_BASE_CLASSIFICATION,
-        "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
-        "report_date": None,
-    }
-    assert ai_manager.validate_schema(response) is True
-
-
-def test_validate_schema_accepts_well_formed_report_date():
-    response = {
-        **_BASE_CLASSIFICATION,
-        "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
-        "report_date": "2026-01-05",
-    }
-    assert ai_manager.validate_schema(response) is True
-
-
-def test_validate_schema_rejects_wrong_format_report_date():
-    # Right idea, wrong format - must be "YYYY-MM-DD", not "DD/MM/YYYY".
-    # Converting between formats is build_prompt()'s job (it instructs
-    # Gemini to always answer in YYYY-MM-DD); validate_schema() only
-    # checks that the answer actually came back in that format.
-    response = {
-        **_BASE_CLASSIFICATION,
-        "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
-        "report_date": "05/01/2026",
-    }
-    assert ai_manager.validate_schema(response) is False
-
-
-def test_validate_schema_rejects_impossible_calendar_date():
-    # Shaped correctly (YYYY-MM-DD) but "month 13" isn't a real month -
-    # only an actual parse (not just a format/regex check) catches this.
-    response = {
-        **_BASE_CLASSIFICATION,
-        "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
-        "report_date": "2026-13-40",
-    }
-    assert ai_manager.validate_schema(response) is False
-
-
-def test_validate_schema_rejects_non_string_report_date():
-    response = {
-        **_BASE_CLASSIFICATION,
-        "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
-        "report_date": 20261010,
-    }
-    assert ai_manager.validate_schema(response) is False
-
-
-# ---------------------------------------------------------------------------
-# Unit tests: verify_source()
-# ---------------------------------------------------------------------------
-
-def test_verify_source_accepts_value_confirmed_by_report():
-    parsed = {
-        "heart_rate": 72,
-        "blood_pressure": {"systolic": 120, "diastolic": 80},
-        "blood_glucose": None,
-        "report_date": "2026-10-10",
-    }
-    with patch("ai_manager.call_ai") as mock_call_ai:
-        mock_call_ai.return_value = json.dumps({
-            "heart_rate_supported": True,
-            "blood_pressure_supported": True,
-            "report_date_supported": True,
-        })
-        assert ai_manager.verify_source(b"fake-bytes", "application/pdf", parsed) is True
-
-
-def test_verify_source_rejects_value_not_confirmed_by_report():
-    # Simulates the report containing no glucose result, but Gemini
-    # extracting one anyway (an "invented" value).
-    parsed = {
-        "heart_rate": None, "blood_pressure": None, "blood_glucose": 5.5,
-        "report_date": None,
-    }
-    with patch("ai_manager.call_ai") as mock_call_ai:
-        mock_call_ai.return_value = json.dumps({"blood_glucose_supported": False})
-        assert ai_manager.verify_source(b"fake-bytes", "application/pdf", parsed) is False
-
-
-def test_verify_source_rejects_invented_report_date():
-    # Same idea as above, but for a fabricated date instead of a
-    # fabricated measurement - e.g. Gemini guessed a date that isn't
-    # actually printed anywhere in the report.
-    parsed = {
-        "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
-        "report_date": "2026-03-14",
-    }
-    with patch("ai_manager.call_ai") as mock_call_ai:
-        mock_call_ai.return_value = json.dumps({"report_date_supported": False})
-        assert ai_manager.verify_source(b"fake-bytes", "application/pdf", parsed) is False
-
-
-def test_verify_source_skips_the_extra_api_call_when_nothing_was_extracted():
-    all_null = {
-        "heart_rate": None, "blood_pressure": None, "blood_glucose": None,
-        "report_date": None,
-    }
-    with patch("ai_manager.call_ai") as mock_call_ai:
-        assert ai_manager.verify_source(b"fake-bytes", "application/pdf", all_null) is True
-        mock_call_ai.assert_not_called()
-
-
-def test_verify_source_treats_malformed_verification_reply_as_unsupported():
-    parsed = {
-        "heart_rate": 72, "blood_pressure": None, "blood_glucose": None,
-        "report_date": None,
-    }
-    with patch("ai_manager.call_ai") as mock_call_ai:
-        mock_call_ai.return_value = "not valid json at all"
-        assert ai_manager.verify_source(b"fake-bytes", "application/pdf", parsed) is False
-
-
-# ---------------------------------------------------------------------------
-# Reliability tests: call_ai() error handling / API & network failures
-# ---------------------------------------------------------------------------
-
-def test_call_ai_handles_missing_api_key_without_crashing():
-    with patch("ai_manager.get_api_key", return_value=None):
-        result = ai_manager.call_ai(b"bytes", "application/pdf", "prompt")
-    assert "error" in json.loads(result)
-
-
-def test_call_ai_handles_authentication_failure_without_leaking_the_key():
-    fake_client = MagicMock()
-    fake_client.models.generate_content.side_effect = genai_errors.ClientError(
-        401, {"error": {"message": "invalid api key", "status": "UNAUTHENTICATED"}}
-    )
-    with patch("ai_manager.get_api_key", return_value="super-secret-key"), \
-            patch("ai_manager.genai.Client", return_value=fake_client):
-        result = ai_manager.call_ai(b"bytes", "application/pdf", "prompt")
-
-    assert "error" in json.loads(result)
-    assert "super-secret-key" not in result
-
-
-def test_call_ai_handles_server_error_without_crashing():
-    fake_client = MagicMock()
-    fake_client.models.generate_content.side_effect = genai_errors.ServerError(
-        503, {"error": {"message": "overloaded", "status": "UNAVAILABLE"}}
-    )
-    with patch("ai_manager.get_api_key", return_value="fake-key"), \
-            patch("ai_manager.genai.Client", return_value=fake_client):
-        result = ai_manager.call_ai(b"bytes", "application/pdf", "prompt")
-
-    assert "error" in json.loads(result)
-
-
-def test_call_ai_handles_network_timeout_without_crashing():
-    fake_client = MagicMock()
-    fake_client.models.generate_content.side_effect = TimeoutError("connection timed out")
-    with patch("ai_manager.get_api_key", return_value="fake-key"), \
-            patch("ai_manager.genai.Client", return_value=fake_client):
-        result = ai_manager.call_ai(b"bytes", "application/pdf", "prompt")
-
-    assert "error" in json.loads(result)
-
-
-def test_call_ai_handles_empty_response_without_crashing():
-    fake_client = MagicMock()
-    fake_client.models.generate_content.return_value = _make_fake_gemini_response("")
-    with patch("ai_manager.get_api_key", return_value="fake-key"), \
-            patch("ai_manager.genai.Client", return_value=fake_client):
-        result = ai_manager.call_ai(b"bytes", "application/pdf", "prompt")
-
-    assert "error" in json.loads(result)
-
-
-# ---------------------------------------------------------------------------
-# Reliability tests: call_ai_with_retry()
-# ---------------------------------------------------------------------------
-
-def test_invalid_response_causes_another_attempt():
-    with patch("ai_manager.call_ai") as mock_call_ai:
-        mock_call_ai.side_effect = [INVALID_RESPONSE, VALID_RESPONSE_ALL_NULL]
-        result = ai_manager.call_ai_with_retry(
-            b"bytes", "application/pdf", "prompt", max_retries=3
-        )
-
-    assert result == PARSED_RESPONSE_ALL_NULL
-    assert mock_call_ai.call_count == 2
-
-
-def test_retry_recovers_after_one_bad_attempt():
-    with patch("ai_manager.call_ai") as mock_call_ai:
-        mock_call_ai.side_effect = [INVALID_RESPONSE, VALID_RESPONSE_ALL_NULL]
-        result = ai_manager.call_ai_with_retry(
-            b"bytes", "application/pdf", "prompt", max_retries=5
-        )
-
-    assert result is not None
-    assert mock_call_ai.call_count == 2  # stopped as soon as it succeeded
-
-
-def test_retry_stops_at_the_configured_limit():
-    with patch("ai_manager.call_ai") as mock_call_ai:
-        mock_call_ai.side_effect = [INVALID_RESPONSE] * 10  # far more than max_retries
-        result = ai_manager.call_ai_with_retry(
-            b"bytes", "application/pdf", "prompt", max_retries=3
-        )
-
-    assert result is None
-    assert mock_call_ai.call_count == 3  # never exceeds max_retries
-
-
-def test_immediately_valid_response_needs_only_one_attempt():
-    with patch("ai_manager.call_ai") as mock_call_ai:
-        mock_call_ai.return_value = VALID_RESPONSE_ALL_NULL
-        result = ai_manager.call_ai_with_retry(
-            b"bytes", "application/pdf", "prompt", max_retries=3
-        )
-
-    assert result is not None
-    assert mock_call_ai.call_count == 1
-
-
-def test_invented_value_fails_source_verification_and_exhausts_retries():
-    # Gemini keeps extracting a blood_glucose value that verify_source
-    # can never confirm is actually written in the report. Each attempt
-    # makes two calls to call_ai(): one to extract, one to verify.
-    extraction_response = json.dumps({
-        **_BASE_CLASSIFICATION,
-        "heart_rate": None,
-        "blood_pressure": None,
-        "blood_glucose": 5.5,
-        "report_date": None,
+def extraction_json(heart_rate=None, blood_pressure=None, blood_glucose=None,
+                    report_date=None, is_medical_report=True):
+    """A valid extraction reply, as the JSON string the AI would return."""
+    return json.dumps({
+        "is_medical_report": is_medical_report,
+        "classification_reason": "Test document.",
+        "heart_rate": heart_rate,
+        "blood_pressure": blood_pressure,
+        "blood_glucose": blood_glucose,
+        "report_date": report_date,
     })
-    verification_response = json.dumps({"blood_glucose_supported": False})
-
-    with patch("ai_manager.call_ai") as mock_call_ai:
-        mock_call_ai.side_effect = [extraction_response, verification_response] * 3
-        result = ai_manager.call_ai_with_retry(
-            b"bytes", "application/pdf", "prompt", max_retries=3
-        )
-
-    assert result is None
-    assert mock_call_ai.call_count == 6  # 3 attempts x (extract + verify)
 
 
-def test_call_ai_with_retry_returns_immediately_when_not_a_medical_report():
-    # A confident non-medical classification is deterministic, not an
-    # "untrustworthy" result - it must come back right away (one call,
-    # no source-verification call, no retries burned re-asking Gemini
-    # the same classification question).
-    with patch("ai_manager.call_ai") as mock_call_ai:
-        mock_call_ai.return_value = NOT_A_MEDICAL_REPORT_RESPONSE
-        result = ai_manager.call_ai_with_retry(
-            b"bytes", "application/pdf", "prompt", max_retries=3
-        )
+def all_supported_json():
+    """A verification reply confirming every field."""
+    return json.dumps({
+        "heart_rate_supported": True,
+        "blood_pressure_supported": True,
+        "blood_glucose_supported": True,
+        "report_date_supported": True,
+    })
 
-    assert result == json.loads(NOT_A_MEDICAL_REPORT_RESPONSE)
-    assert result["is_medical_report"] is False
-    assert mock_call_ai.call_count == 1
+
+NOT_MEDICAL = extraction_json(is_medical_report=False)
 
 
 # ---------------------------------------------------------------------------
-# Reliability test: stability under repeated calls
+# ResponseParser
 # ---------------------------------------------------------------------------
 
-def test_repeated_calls_do_not_crash_or_corrupt_shared_state():
-    """
-    Calls call_ai_with_retry() many times in a row with a mix of
-    malformed, schema-invalid, and valid mocked responses, and checks
-    that: (1) nothing ever raises an exception, (2) the result is
-    always the expected value, and (3) the module-level constants every
-    call relies on for validation are never accidentally mutated.
-    """
-    original_top_level_keys = set(ai_manager._REQUIRED_TOP_LEVEL_KEYS)
-    original_bp_keys = set(ai_manager._REQUIRED_BLOOD_PRESSURE_KEYS)
+class TestResponseParser:
+    def test_accepts_json_object(self):
+        assert ResponseParser().parse('{"a": 1}') == {"a": 1}
 
-    responses = [
-        "not valid json",
-        json.dumps({
-            **_BASE_CLASSIFICATION,
-            "heart_rate": 72,
-            "blood_pressure": None,
-            "blood_glucose": None,
-            "extra_field": "should be rejected",
-        }),
-        VALID_RESPONSE_ALL_NULL,
-    ]
-
-    for i in range(50):
-        with patch("ai_manager.call_ai") as mock_call_ai:
-            mock_call_ai.side_effect = list(responses)
-            try:
-                result = ai_manager.call_ai_with_retry(
-                    b"bytes", "application/pdf", "prompt", max_retries=3
-                )
-            except Exception as exc:  # pragma: no cover - this must never happen
-                pytest.fail(f"call_ai_with_retry raised on iteration {i}: {exc}")
-
-        assert result == PARSED_RESPONSE_ALL_NULL
-
-    assert ai_manager._REQUIRED_TOP_LEVEL_KEYS == original_top_level_keys
-    assert ai_manager._REQUIRED_BLOOD_PRESSURE_KEYS == original_bp_keys
+    @pytest.mark.parametrize("raw", [INVALID, "[1, 2, 3]", "", None, 42])
+    def test_rejects_everything_else_without_raising(self, raw):
+        assert ResponseParser().parse(raw) is None
 
 
 # ---------------------------------------------------------------------------
-# Reliability test: logging (documented as not yet implemented)
+# ExtractionTask.validate (response schema)
 # ---------------------------------------------------------------------------
 
-def test_logging_not_yet_implemented():
-    """
-    ai_manager.py does not import or call Python's `logging` module
-    anywhere - AI/API failures are currently reported only by returning
-    a JSON error string to the caller (see call_ai()), never logged.
+def _valid(**overrides):
+    base = json.loads(extraction_json(
+        heart_rate=72, blood_glucose=5.5,
+        blood_pressure={"systolic": 120, "diastolic": 80},
+        report_date="2026-10-10",
+    ))
+    base.update(overrides)
+    return base
 
-    This is recorded as a skipped test rather than silently left out,
-    so it shows up in the test run as a visible reminder. Once logging
-    is added to ai_manager.py, replace this with a real test using
-    pytest's `caplog` fixture to assert a log record was emitted on
-    failure.
-    """
-    pytest.skip("No logging implemented in ai_manager.py yet - nothing to verify.")
+
+class TestExtractionValidation:
+    task = ExtractionTask(ResponseParser())
+
+    def test_accepts_full_response(self):
+        assert self.task.validate(_valid())
+
+    def test_accepts_all_null_measurements(self):
+        assert self.task.validate(_valid(
+            heart_rate=None, blood_glucose=None, blood_pressure=None, report_date=None))
+
+    def test_accepts_partial_blood_pressure(self):
+        assert self.task.validate(_valid(blood_pressure={"systolic": 120, "diastolic": None}))
+
+    def test_accepts_non_medical_classification(self):
+        assert self.task.validate(json.loads(NOT_MEDICAL))
+
+    @pytest.mark.parametrize("overrides", [
+        {"heart_rate": "72"},                                   # string, not a number
+        {"heart_rate": True},                                   # bool is not a measurement
+        {"blood_glucose": [5.5]},
+        {"blood_pressure": {"systolic": 120}},                  # missing key
+        {"blood_pressure": {"systolic": "x", "diastolic": 80}},
+        {"blood_pressure": 120},
+        {"report_date": "05/01/2026"},                          # wrong format
+        {"report_date": "2026-13-40"},                          # not a real date
+        {"report_date": 20261010},
+        {"is_medical_report": "yes"},
+        {"classification_reason": "   "},
+        {"classification_reason": 5},
+    ])
+    def test_rejects_invalid_values(self, overrides):
+        assert not self.task.validate(_valid(**overrides))
+
+    def test_rejects_extra_field(self):
+        assert not self.task.validate({**_valid(), "diagnosis": "possible hypertension"})
+
+    def test_rejects_missing_field(self):
+        incomplete = _valid()
+        del incomplete["heart_rate"]
+        assert not self.task.validate(incomplete)
+
+    def test_rejects_non_dict(self):
+        assert not self.task.validate(None)
+        assert not self.task.validate(["not", "a", "dict"])
+
+
+class TestOtherTaskValidation:
+    def test_verification_accepts_booleans_for_known_keys(self):
+        task = VerificationTask(ResponseParser())
+        assert task.validate({"heart_rate_supported": True, "report_date_supported": False})
+
+    def test_verification_rejects_unknown_keys_and_non_booleans(self):
+        task = VerificationTask(ResponseParser())
+        assert not task.validate({"unknown_supported": True})
+        assert not task.validate({"heart_rate_supported": "yes"})
+
+    def test_narrative_requires_non_empty_string(self):
+        task = NarrativeTask(ResponseParser())
+        assert task.validate({"narrative": "Some notes."})
+        assert not task.validate({"narrative": "  "})
+        assert not task.validate({"narrative": 5})
+        assert not task.validate({})
 
 
 # ---------------------------------------------------------------------------
-# Reliability test: idempotency (documented decision, not forced)
+# OOP structure: interface, abstract class, inheritance, polymorphism
 # ---------------------------------------------------------------------------
 
-def test_idempotency_not_applicable():
-    """
-    ai_manager.py performs no state-changing operations of its own: no
-    file writes, no database updates, and no in-memory state that
-    persists between calls (data_manager.py owns persistence, and
-    that's out of scope for this module). Every function here is a
-    request/response step - call it once or ten times and nothing on
-    disk or in memory changes as a side effect of ai_manager.py's own
-    code.
+class TestDesign:
+    def test_interface_cannot_be_instantiated(self):
+        with pytest.raises(TypeError):
+            AIClient()
 
-    Idempotency is about what happens when a state-changing operation
-    is repeated (e.g. "does submitting a payment twice charge twice?").
-    Since there is no such operation here, a forced idempotency test
-    would not be testing anything real, so it is intentionally skipped
-    rather than fabricated.
+    def test_abstract_task_cannot_be_instantiated(self):
+        with pytest.raises(TypeError):
+            AITask(ResponseParser())
 
-    Note: Gemini itself is a generative model, so calling call_ai()
-    twice with the same prompt is not guaranteed to return
-    byte-identical text - but that is a property of the external AI
-    service, not of ai_manager.py's own code, and is exactly why
-    validate_schema() and verify_source() exist: to make the *outcome*
-    trustworthy even though the raw text may vary between calls.
-    """
-    pytest.skip(
-        "ai_manager.py has no state-changing operation to test for "
-        "idempotency - see this test's docstring for the reasoning."
-    )
+    def test_concrete_clients_implement_the_interface(self):
+        assert issubclass(GeminiClient, AIClient)
+        assert issubclass(MockAIClient, AIClient)
+
+    def test_concrete_tasks_extend_the_abstract_task(self):
+        for cls in (ExtractionTask, VerificationTask, NarrativeTask):
+            assert issubclass(cls, AITask)
+
+    def test_manager_works_with_any_client_implementation(self):
+        # Liskov: a brand-new AIClient is substitutable with no manager changes.
+        class OneShot(AIClient):
+            def generate(self, prompt, file_bytes=None, mime_type=None):
+                return NOT_MEDICAL
+
+        result = AIManager(OneShot()).extract_report(b"x", PDF)
+        assert result["is_medical_report"] is False
+
+    def test_each_task_builds_a_different_prompt(self):
+        parser = ResponseParser()
+        prompts = {
+            ExtractionTask(parser).build_prompt(),
+            VerificationTask(parser).build_prompt(extracted={"heart_rate": 1}),
+            NarrativeTask(parser).build_prompt(record={"decision": "NORMAL"}),
+        }
+        assert len(prompts) == 3
+
+    def test_prompts_request_json(self):
+        assert "JSON" in PromptBuilder.extraction()
+        assert "JSON" in PromptBuilder.verification({"heart_rate": 72})
+        assert "JSON" in PromptBuilder.narrative({"decision": "NORMAL"})
+
+    def test_verification_prompt_includes_extracted_values(self):
+        assert "72" in PromptBuilder.verification({"heart_rate": 72})
+
+
+# ---------------------------------------------------------------------------
+# AITask.run (shared template flow)
+# ---------------------------------------------------------------------------
+
+class TestAITaskRun:
+    task = ExtractionTask(ResponseParser())
+
+    def test_returns_validated_dict(self):
+        client = MockAIClient([extraction_json(heart_rate=72)])
+        assert self.task.run(client, b"x", PDF)["heart_rate"] == 72
+
+    def test_returns_none_on_service_error(self):
+        assert self.task.run(MockAIClient([AIServiceError("down")]), b"x", PDF) is None
+
+    def test_returns_none_on_malformed_json(self):
+        assert self.task.run(MockAIClient([INVALID]), b"x", PDF) is None
+
+    def test_returns_none_on_invalid_schema(self):
+        assert self.task.run(MockAIClient([json.dumps({"heart_rate": 72})]), b"x", PDF) is None
+
+    def test_passes_file_and_mime_type_to_client(self):
+        client = MockAIClient([extraction_json()])
+        self.task.run(client, b"report-bytes", PDF)
+        assert client.calls[0]["file_bytes"] == b"report-bytes"
+        assert client.calls[0]["mime_type"] == PDF
+
+
+# ---------------------------------------------------------------------------
+# AIManager.verify_source
+# ---------------------------------------------------------------------------
+
+class TestVerifySource:
+    PARSED = {"heart_rate": 72, "blood_pressure": {"systolic": 120, "diastolic": 80},
+              "blood_glucose": None, "report_date": "2026-10-10"}
+    NOTHING = {"heart_rate": None, "blood_pressure": None, "blood_glucose": None,
+               "report_date": None}
+
+    def test_accepts_confirmed_values(self):
+        reply = json.dumps({"heart_rate_supported": True, "blood_pressure_supported": True,
+                            "report_date_supported": True})
+        assert AIManager(MockAIClient([reply])).verify_source(b"x", PDF, self.PARSED) is True
+
+    def test_rejects_unconfirmed_measurement(self):
+        parsed = {**self.NOTHING, "blood_glucose": 5.5}
+        reply = json.dumps({"blood_glucose_supported": False})
+        assert AIManager(MockAIClient([reply])).verify_source(b"x", PDF, parsed) is False
+
+    def test_rejects_invented_date(self):
+        parsed = {**self.NOTHING, "report_date": "2026-03-14"}
+        reply = json.dumps({"report_date_supported": False})
+        assert AIManager(MockAIClient([reply])).verify_source(b"x", PDF, parsed) is False
+
+    def test_makes_no_api_call_when_nothing_was_extracted(self):
+        client = MockAIClient([])
+        assert AIManager(client).verify_source(b"x", PDF, self.NOTHING) is True
+        assert client.calls == []
+
+    def test_malformed_reply_counts_as_unsupported(self):
+        parsed = {**self.NOTHING, "heart_rate": 72}
+        assert AIManager(MockAIClient(["not json"])).verify_source(b"x", PDF, parsed) is False
+
+    def test_service_failure_counts_as_unsupported(self):
+        parsed = {**self.NOTHING, "heart_rate": 72}
+        client = MockAIClient([AIServiceError("down")])
+        assert AIManager(client).verify_source(b"x", PDF, parsed) is False
+
+    def test_missing_confirmation_key_counts_as_unsupported(self):
+        # AI confirms heart rate but says nothing about the date.
+        parsed = {**self.NOTHING, "heart_rate": 72, "report_date": "2026-10-10"}
+        reply = json.dumps({"heart_rate_supported": True})
+        assert AIManager(MockAIClient([reply])).verify_source(b"x", PDF, parsed) is False
+
+
+# ---------------------------------------------------------------------------
+# AIManager.extract_report (retry + verification pipeline)
+# ---------------------------------------------------------------------------
+
+class TestExtractReport:
+    def test_valid_all_null_response_needs_one_call(self):
+        client = MockAIClient([extraction_json()])
+        result = AIManager(client, max_retries=3).extract_report(b"x", PDF)
+        assert result == json.loads(extraction_json())
+        assert len(client.calls) == 1  # nothing extracted, so no verification call
+
+    def test_recovers_after_malformed_reply(self):
+        client = MockAIClient([INVALID, extraction_json()])
+        assert AIManager(client, max_retries=5).extract_report(b"x", PDF) is not None
+        assert len(client.calls) == 2
+
+    def test_schema_invalid_reply_is_retried(self):
+        bad = json.dumps({**json.loads(extraction_json()), "extra": 1})
+        client = MockAIClient([bad, extraction_json()])
+        assert AIManager(client, max_retries=3).extract_report(b"x", PDF) is not None
+
+    def test_stops_at_retry_limit(self):
+        client = MockAIClient([INVALID] * 10)
+        assert AIManager(client, max_retries=3).extract_report(b"x", PDF) is None
+        assert len(client.calls) == 3
+
+    def test_service_errors_do_not_crash_and_are_retried(self):
+        client = MockAIClient([AIServiceError("down"), AIServiceError("down")])
+        assert AIManager(client, max_retries=2).extract_report(b"x", PDF) is None
+        assert len(client.calls) == 2
+
+    def test_recovers_after_service_error(self):
+        client = MockAIClient([AIServiceError("timeout"), extraction_json()])
+        assert AIManager(client, max_retries=2).extract_report(b"x", PDF) is not None
+
+    def test_invented_value_exhausts_retries(self):
+        ext = extraction_json(blood_glucose=5.5)
+        ver = json.dumps({"blood_glucose_supported": False})
+        client = MockAIClient([ext, ver] * 3)
+        assert AIManager(client, max_retries=3).extract_report(b"x", PDF) is None
+        assert len(client.calls) == 6  # 3 attempts x (extract + verify)
+
+    def test_not_a_medical_report_returns_immediately(self):
+        client = MockAIClient([NOT_MEDICAL])
+        result = AIManager(client, max_retries=3).extract_report(b"x", PDF)
+        assert result["is_medical_report"] is False
+        assert len(client.calls) == 1  # no verification, no retries
+
+    def test_verified_measurements_are_accepted(self):
+        client = MockAIClient([extraction_json(heart_rate=72), all_supported_json()])
+        result = AIManager(client).extract_report(b"x", PDF)
+        assert result["heart_rate"] == 72
+
+    def test_blood_pressure_is_returned_nested(self):
+        bp = {"systolic": 120, "diastolic": 80}
+        client = MockAIClient([extraction_json(blood_pressure=bp), all_supported_json()])
+        assert AIManager(client).extract_report(b"x", PDF)["blood_pressure"] == bp
+
+    def test_only_date_unverified_keeps_measurements_and_drops_date(self):
+        ext = extraction_json(heart_rate=72, report_date="2026-10-10")
+        ver = json.dumps({"heart_rate_supported": True, "report_date_supported": False})
+        result = AIManager(MockAIClient([ext, ver])).extract_report(b"x", PDF)
+        assert result["heart_rate"] == 72
+        assert result["report_date"] is None
+
+    def test_unverified_verification_reply_triggers_retry(self):
+        client = MockAIClient([
+            extraction_json(heart_rate=72), INVALID,                     # attempt 1: bad verify
+            extraction_json(heart_rate=72), all_supported_json(),        # attempt 2: ok
+        ])
+        assert AIManager(client, max_retries=2).extract_report(b"x", PDF) is not None
+
+    def test_file_is_sent_to_extraction_and_verification(self):
+        client = MockAIClient([extraction_json(heart_rate=72), all_supported_json()])
+        AIManager(client).extract_report(b"report", PDF)
+        assert all(c["file_bytes"] == b"report" and c["mime_type"] == PDF for c in client.calls)
+
+    def test_repeated_runs_stay_stable(self):
+        for _ in range(25):
+            client = MockAIClient([INVALID, extraction_json()])
+            assert AIManager(client, max_retries=3).extract_report(b"x", PDF) is not None
+
+
+# ---------------------------------------------------------------------------
+# AIManager.generate_narrative
+# ---------------------------------------------------------------------------
+
+class TestNarrative:
+    def test_returns_stripped_narrative(self):
+        ai = AIManager(MockAIClient([json.dumps({"narrative": "  Hello.  "})]))
+        assert ai.generate_narrative({"decision": "NORMAL"}) == "Hello."
+
+    def test_returns_none_when_every_attempt_is_unusable(self):
+        ai = AIManager(MockAIClient([INVALID, json.dumps({"narrative": ""})]), max_retries=2)
+        assert ai.generate_narrative({}) is None
+
+    def test_returns_none_on_service_error(self):
+        ai = AIManager(MockAIClient([AIServiceError("down")]), max_retries=1)
+        assert ai.generate_narrative({}) is None
+
+    def test_recovers_after_bad_attempt(self):
+        ai = AIManager(MockAIClient([INVALID, json.dumps({"narrative": "ok"})]), max_retries=2)
+        assert ai.generate_narrative({}) == "ok"
+
+    def test_text_only_request_sends_no_file(self):
+        client = MockAIClient([json.dumps({"narrative": "ok"})])
+        AIManager(client).generate_narrative({})
+        assert client.calls[0]["file_bytes"] is None
+
+    def test_record_is_included_in_the_prompt(self):
+        client = MockAIClient([json.dumps({"narrative": "ok"})])
+        AIManager(client).generate_narrative({"decision": "FLAGGED"})
+        assert "FLAGGED" in client.calls[0]["prompt"]
+
+
+# ---------------------------------------------------------------------------
+# RetryPolicy
+# ---------------------------------------------------------------------------
+
+class TestRetryPolicy:
+    def test_yields_max_attempts(self):
+        assert list(RetryPolicy(3).attempts()) == [1, 2, 3]
+
+    def test_exponential_backoff_between_attempts_only(self):
+        waits = []
+        list(RetryPolicy(4, base_delay=2, sleeper=waits.append).attempts())
+        assert waits == [2, 4, 8]  # nothing before attempt 1
+
+    def test_no_wait_by_default(self):
+        waits = []
+        list(RetryPolicy(3, sleeper=waits.append).attempts())
+        assert waits == []
+
+    def test_at_least_one_attempt(self):
+        assert list(RetryPolicy(0).attempts()) == [1]
+
+    def test_manager_passes_its_retry_settings_to_the_policy(self):
+        with patch("ai_manager.RetryPolicy", wraps=RetryPolicy) as policy:
+            AIManager(MockAIClient(), max_retries=3, retry_delay=1.5)
+        policy.assert_called_once_with(3, 1.5)
+
+
+# ---------------------------------------------------------------------------
+# GeminiClient error handling (SDK patched - no network)
+# ---------------------------------------------------------------------------
+
+def _gemini(key="fake-key"):
+    return GeminiClient(models=["model-1", "model-2"], key_provider=lambda: key)
+
+
+def _patched_sdk(**configure):
+    """Patch genai.Client; `configure` sets up generate_content (side_effect/return_value)."""
+    fake = MagicMock()
+    fake.models.generate_content.configure_mock(**configure)
+    return patch("ai_layer.client.genai.Client", return_value=fake), fake
+
+
+class TestGeminiClient:
+    def test_missing_key_raises_service_error(self):
+        with pytest.raises(AIServiceError):
+            _gemini(key=None).generate("prompt")
+
+    def test_file_without_mime_type_raises(self):
+        with pytest.raises(AIServiceError):
+            _gemini().generate("prompt", b"bytes", None)
+
+    def test_auth_failure_does_not_leak_the_key(self):
+        error = genai_errors.ClientError(
+            401, {"error": {"message": "bad key", "status": "UNAUTHENTICATED"}})
+        sdk, _ = _patched_sdk(side_effect=error)
+        with sdk, pytest.raises(AIServiceError) as exc:
+            _gemini(key="super-secret-key").generate("prompt", b"b", PDF)
+        assert "super-secret-key" not in str(exc.value)
+
+    def test_auth_failure_does_not_try_other_models(self):
+        error = genai_errors.ClientError(
+            403, {"error": {"message": "forbidden", "status": "PERMISSION_DENIED"}})
+        sdk, fake = _patched_sdk(side_effect=error)
+        with sdk, pytest.raises(AIServiceError):
+            _gemini().generate("prompt", b"b", PDF)
+        assert fake.models.generate_content.call_count == 1
+
+    def test_bad_request_does_not_try_other_models(self):
+        error = genai_errors.ClientError(
+            400, {"error": {"message": "bad request", "status": "INVALID_ARGUMENT"}})
+        sdk, fake = _patched_sdk(side_effect=error)
+        with sdk, pytest.raises(AIServiceError):
+            _gemini().generate("prompt", b"b", PDF)
+        assert fake.models.generate_content.call_count == 1
+
+    def test_falls_back_to_next_model_when_unavailable(self):
+        busy = genai_errors.ServerError(
+            503, {"error": {"message": "busy", "status": "UNAVAILABLE"}})
+        sdk, fake = _patched_sdk(side_effect=[busy, MagicMock(text='{"a": 1}')])
+        with sdk:
+            assert _gemini().generate("prompt", b"b", PDF) == '{"a": 1}'
+        models_tried = [c.kwargs["model"] for c in fake.models.generate_content.call_args_list]
+        assert models_tried == ["model-1", "model-2"]
+
+    def test_all_models_unavailable_raises(self):
+        busy = genai_errors.ServerError(
+            503, {"error": {"message": "busy", "status": "UNAVAILABLE"}})
+        sdk, fake = _patched_sdk(side_effect=busy)
+        with sdk, pytest.raises(AIServiceError):
+            _gemini().generate("prompt", b"b", PDF)
+        assert fake.models.generate_content.call_count == 2
+
+    def test_network_timeout_raises_service_error(self):
+        sdk, _ = _patched_sdk(side_effect=TimeoutError("timed out"))
+        with sdk, pytest.raises(AIServiceError):
+            _gemini().generate("prompt", b"b", PDF)
+
+    def test_empty_response_raises(self):
+        sdk, _ = _patched_sdk(return_value=MagicMock(text=""))
+        with sdk, pytest.raises(AIServiceError):
+            _gemini().generate("prompt", b"b", PDF)
+
+    def test_text_only_prompt_works(self):
+        sdk, _ = _patched_sdk(return_value=MagicMock(text='{"narrative": "ok"}'))
+        with sdk:
+            assert json.loads(_gemini().generate("text only")) == {"narrative": "ok"}
+
+    def test_key_is_read_at_call_time(self):
+        keys = iter(["first", "second"])
+        client = GeminiClient(models=["m"], key_provider=lambda: next(keys))
+        sdk, fake = _patched_sdk(return_value=MagicMock(text="{}"))
+        with sdk as constructor:
+            client.generate("p")
+            client.generate("p")
+        used = [c.kwargs["api_key"] for c in constructor.call_args_list]
+        assert used == ["first", "second"]
+
+    def test_duplicate_models_are_removed(self):
+        busy = genai_errors.ServerError(
+            503, {"error": {"message": "busy", "status": "UNAVAILABLE"}})
+        client = GeminiClient(models=["m", "m"], key_provider=lambda: "k")
+        sdk, fake = _patched_sdk(side_effect=busy)
+        with sdk, pytest.raises(AIServiceError):
+            client.generate("prompt")
+        assert fake.models.generate_content.call_count == 1
+
+
+class TestMockAIClient:
+    def test_returns_scripted_replies_in_order_and_records_calls(self):
+        client = MockAIClient(["a", "b"])
+        assert client.generate("p1") == "a"
+        assert client.generate("p2", b"x", PDF) == "b"
+        assert [c["prompt"] for c in client.calls] == ["p1", "p2"]
+
+    def test_raises_scripted_exceptions(self):
+        client = MockAIClient([AIServiceError("x")])
+        with pytest.raises(AIServiceError):
+            client.generate("p")
+
+    def test_raises_when_script_is_exhausted(self):
+        with pytest.raises(AIServiceError):
+            MockAIClient([]).generate("p")
