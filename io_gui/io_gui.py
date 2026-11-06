@@ -8,7 +8,7 @@ import hashlib
 import hmac
 import secrets
 from pathlib import Path
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import pandas as pd
 import altair as alt
@@ -931,6 +931,101 @@ def build_readings_table_rows(records):
         })
     return rows
 
+# ---------------------------------------------------------------------------
+# Self-logged vitals ("My Vitals" page)
+# ---------------------------------------------------------------------------
+# Readings the user measured at home and typed in by hand. They are
+# stored in data/manual_vitals.json (NOT health_records.json), so they
+# never appear in the report-based History, Trends or Consultation pages.
+
+vitals_validator = logic_manager.ManualVitalsValidator()
+vitals_logic = logic_manager.LogicManager.default()
+
+VITAL_COLUMNS = [
+    ("blood_pressure_systolic", "Systolic BP", "mmHg"),
+    ("blood_pressure_diastolic", "Diastolic BP", "mmHg"),
+    ("heart_rate", "Heart Rate", "bpm"),
+    ("blood_glucose", "Blood Glucose", "mmol/L"),
+]
+
+VITALS_PERIODS = {
+    "Last 7 days": 7,
+    "Last 30 days": 30,
+    "Last 90 days": 90,
+    "All time": None,
+}
+
+
+def vitals_in_period(entries, days):
+    """Keep only entries measured within the last ⁠ days ⁠ days (None = all)."""
+    if days is None:
+        return list(entries)
+    cutoff = (date.today() - timedelta(days=days - 1)).isoformat()
+    return [e for e in entries if (e.get("date") or "") >= cutoff]
+
+
+def build_vitals_table_rows(entries):
+    """Display rows for the self-logged history table, newest first."""
+    newest_first = sorted(
+        entries, key=lambda e: (e.get("date") or "", e.get("time") or ""), reverse=True
+    )
+    rows = []
+    for entry in newest_first:
+        metrics = entry.get("metrics", {})
+        row = {
+            "Measured On": _format_report_date(entry.get("date")),
+            "Time": entry.get("time") or "—",
+        }
+        for key, label, unit in VITAL_COLUMNS:
+            row[label] = _format_measurement(metrics.get(key), unit)
+        row["Outcome"] = entry.get("decision", "")
+        row["Note"] = entry.get("note", "")
+        rows.append(row)
+    return rows
+
+
+def build_vitals_chart(entries, members, title, unit):
+    """
+    One Altair line chart for one group of self-logged vitals (e.g.
+    systolic + diastolic together). Uses date AND time on the x-axis, so
+    a morning and an evening reading on the same day are two points.
+    Returns None if there is nothing to plot.
+    """
+    rows = []
+    for entry in entries:
+        if not entry.get("date"):
+            continue
+        when = entry["date"] + " " + (entry.get("time") or "00:00")
+        for key, label in members:
+            value = entry.get("metrics", {}).get(key)
+            if value is not None:
+                rows.append({"when": when, "measurement": label, "value": value})
+
+    if not rows:
+        return None
+
+    df = pd.DataFrame(rows)
+    df["when"] = pd.to_datetime(df["when"], errors="coerce")
+    df = df.dropna(subset=["when"])
+    if df.empty:
+        return None
+
+    return (
+        alt.Chart(df)
+        .mark_line(point=True)
+        .encode(
+            x=alt.X("when:T", title="Measured", axis=alt.Axis(format="%d %b", labelAngle=0)),
+            y=alt.Y("value:Q", title=f"{title} ({unit})", scale=alt.Scale(zero=False)),
+            color=alt.Color("measurement:N", legend=alt.Legend(title=None, orient="top")),
+            tooltip=[
+                alt.Tooltip("when:T", title="Measured", format="%d %b %Y, %H:%M"),
+                alt.Tooltip("measurement:N", title="Measurement"),
+                alt.Tooltip("value:Q", title=unit),
+            ],
+        )
+        .properties(height=260)
+        .interactive()
+    )
 
 def severity_badge(severity):
     s = SEVERITY_STYLE.get(severity, SEVERITY_STYLE["info"])
