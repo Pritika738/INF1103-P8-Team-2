@@ -1,3 +1,4 @@
+import math
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -18,10 +19,12 @@ class ExtractedFile:
         self.__mime_type = self._require_text(mime_type, "mime_type")
         self.__is_medical_report = is_medical_report
         self.__classification_reason = classification_reason
-        self.__heart_rate = heart_rate
-        self.__bp_systolic = blood_pressure_systolic
-        self.__bp_diastolic = blood_pressure_diastolic
-        self.__blood_glucose = blood_glucose
+        self.__heart_rate = self._validate_metric(heart_rate, "heart_rate")
+        self.__bp_systolic = self._validate_metric(
+            blood_pressure_systolic, "blood_pressure_systolic")
+        self.__bp_diastolic = self._validate_metric(
+            blood_pressure_diastolic, "blood_pressure_diastolic")
+        self.__blood_glucose = self._validate_metric(blood_glucose, "blood_glucose")
         self.__report_date = self._validate_date(report_date)  # "YYYY-MM-DD" or None
 
     @staticmethod
@@ -31,7 +34,7 @@ class ExtractedFile:
             raise ValueError(f"{field_name} must be a non-empty string.")
         return value.strip()
 
-     @staticmethod
+    @staticmethod
     def _validate_date(value: Optional[str]) -> Optional[str]:
         """Return value if it is a real 'YYYY-MM-DD' date, None if no date given."""
         if value is None:
@@ -45,6 +48,20 @@ class ExtractedFile:
             raise ValueError(f"report_date {value!r} is not a real date.") from None
         if parsed.strftime("%Y-%m-%d") != value:
             raise ValueError(f"report_date {value!r} must use the format YYYY-MM-DD.")
+        return value
+
+    @staticmethod
+    def _validate_metric(value: Optional[float], field_name: str) -> Optional[float]:
+        """Return value if it is a real, non-negative number; None if not measured."""
+        if value is None:
+            return None
+        # bool is a subclass of int in Python, but True/False is not a measurement.
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{field_name} must be a number or None.")
+        if not math.isfinite(value):
+            raise ValueError(f"{field_name} must be a finite number.")
+        if value < 0:
+            raise ValueError(f"{field_name} must not be negative.")
         return value
     
     # ------------------------------------------------------------------
