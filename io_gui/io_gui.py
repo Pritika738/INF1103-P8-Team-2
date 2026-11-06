@@ -835,6 +835,39 @@ def _format_report_date(raw_date):
         return "Date Unavailable"
 
 
+def _format_summary_timestamp(raw_iso):
+    """
+    Turn a stored consultation-summary "generated_at" ISO timestamp
+    (e.g. "2026-10-13T16:20:21.865890") into a readable display format
+    ("13 Oct 2026, 4:20 PM"), in the server's local time - the same
+    time source every other timestamp in this app already uses, so
+    nothing here is suddenly on a different clock.
+
+    strftime's "%I" (12-hour) is zero-padded ("04"), which this
+    manually strips to match the requested "4:20 PM" style - there is
+    no single portable strftime code for an un-padded 12-hour across
+    both Windows and the Linux container this app also runs in.
+
+    Args:
+        raw_iso: str or None - a summary's stored "generated_at" field.
+
+    Returns:
+        A display string: either "DD Mon YYYY, H:MM AM/PM" or
+        "Unknown" if missing/unparseable.
+    """
+    if not raw_iso:
+        return "Unknown"
+    try:
+        timestamp = datetime.fromisoformat(raw_iso)
+    except ValueError:
+        return "Unknown"
+    hour_12 = timestamp.strftime("%I").lstrip("0") or "12"
+    return (
+        timestamp.strftime("%d %b %Y, ")
+        + f"{hour_12}:{timestamp.strftime('%M')} {timestamp.strftime('%p')}"
+    )
+
+
 def _format_measurement(value, unit):
     """
     Format one measurement value for display: "—" if missing, otherwise
@@ -962,9 +995,10 @@ USERNAME_PATTERN = re.compile(
     r"^[A-Za-z0-9_.-]{3,30}$"
 )
 
-EMAIL_PATTERN = re.compile(
-    r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
-)
+# [0-9] rather than \d: Python's \d matches any Unicode decimal digit
+# (e.g. Arabic-indic 0-9), not just ASCII 0-9. "Digits only, reject
+# everything else" should mean ASCII digits specifically.
+PHONE_PATTERN = re.compile(r"^[0-9]{8}$")
 
 PASSWORD_ITERATIONS = 200_000
 
@@ -994,15 +1028,18 @@ def validate_username(username: str) -> str:
     return ""
 
 
-def validate_email(email: str) -> str:
+def validate_phone(phone: str) -> str:
 
-    email = email.strip()
+    phone = phone.strip()
 
-    if not email:
-        return "Please enter an email address."
+    if not phone:
+        return "Please enter a phone number."
 
-    if not EMAIL_PATTERN.fullmatch(email):
-        return "Please enter a valid email address."
+    if not PHONE_PATTERN.fullmatch(phone):
+        return (
+            "Phone number must be exactly 8 digits, with no letters, "
+            "spaces or special characters."
+        )
 
     return ""
 
@@ -1103,7 +1140,7 @@ def save_accounts(accounts: dict) -> None:
 
 def create_temporary_account(
     username: str,
-    email: str,
+    phone: str,
     password: str
 ) -> tuple[bool, str]:
     """
@@ -1115,7 +1152,7 @@ def create_temporary_account(
     """
 
     username = username.strip()
-    email = email.strip().lower()
+    phone = phone.strip()
 
     username_key = username.lower()
 
@@ -1123,24 +1160,14 @@ def create_temporary_account(
 
     # Check duplicate username
     if username_key in accounts:
+        return (False, "That username is already taken.")
 
-        return (
-            False,
-            "That username is already taken."
-        )
-
-    # Check duplicate email
+    # Check duplicate phone number
     for account in accounts.values():
-
-        if account.get(
-            "email",
-            ""
-        ).lower() == email:
-
+        if account.get("phone", "") == phone:
             return (
                 False,
-                "An account already exists "
-                "with this email address."
+                "An account already exists with this phone number."
             )
 
     # Create random salt for password hashing
@@ -1149,22 +1176,14 @@ def create_temporary_account(
     # Store HASH, not actual password
     accounts[username_key] = {
         "username": username,
-        "email": email,
+        "phone": phone,
         "salt": salt,
-        "password_hash": hash_password(
-            password,
-            salt
-        )
+        "password_hash": hash_password(password, salt)
     }
 
-    save_accounts(
-        accounts
-    )
+    save_accounts(accounts)
 
-    return (
-        True,
-        "Account created successfully."
-    )
+    return (True, "Account created successfully.")
 
 def authenticate_temporary_account(
     username: str,
@@ -1189,6 +1208,45 @@ def authenticate_temporary_account(
         entered_hash,
         account["password_hash"]
     )
+
+# ---------------------------------------------------------
+# PIN LOGIN PRIMITIVES
+# NOTE: the Commit 4 plan says these already exist; they were not in
+# the file provided, so minimal versions are included here. Delete this
+# block if your own validate_pin / authenticate_with_pin /
+# PIN_MAX_ATTEMPTS already exist elsewhere. Assumes an account stores
+# "pin_salt" and "pin_hash" (hash_password() applied to the PIN).
+# ---------------------------------------------------------
+
+PIN_MAX_ATTEMPTS = 3
+PIN_PATTERN = re.compile(r"^[0-9]{4}$")
+
+
+def validate_pin(pin: str) -> str:
+
+    if not pin:
+        return "Please enter your PIN."
+
+    if not PIN_PATTERN.fullmatch(pin):
+        return "PIN must be exactly 4 digits."
+
+    return ""
+
+
+def authenticate_with_pin(username: str, pin: str) -> bool:
+
+    account = load_accounts().get(username.strip().lower())
+
+    if (
+        account is None
+        or "pin_hash" not in account
+        or "pin_salt" not in account
+    ):
+        return False
+
+    entered_hash = hash_password(pin, account["pin_salt"])
+
+    return hmac.compare_digest(entered_hash, account["pin_hash"])
 
 def validate_uploaded_report(
     uploaded_file
@@ -1345,10 +1403,6 @@ def show_login():
                         "username"
                     ]
 
-                    st.session_state.email = account[
-                        "email"
-                    ]
-
                     go("dashboard")
 
             st.caption(
@@ -1361,6 +1415,81 @@ def show_login():
             ):
 
                 go("register")
+
+            if st.button(
+                "Quick login with PIN",
+                use_container_width=True,
+                key="goto_pin_login",
+            ):
+                go("pin_login")
+
+def show_pin_login():
+
+    left, mid, right = st.columns([1, 1.4, 1])
+
+    with mid:
+
+        st.markdown(
+            "<div class='vt-hero' style='text-align:center;margin-top:2.5rem;'>"
+            "<div class='vt-bob' style='font-size:3rem;'>🔑</div>"
+            "<h1 style='margin:0;'>Quick login with PIN</h1>"
+            "<p style='color:var(--text-muted);'>"
+            "Enter your username and 4-digit PIN."
+            "</p></div>",
+            unsafe_allow_html=True,
+        )
+
+        with st.container(border=True):
+
+            attempts = st.session_state.get("pin_attempts", 0)
+
+            if attempts >= PIN_MAX_ATTEMPTS:
+
+                st.error(
+                    "Too many incorrect PIN attempts. Please sign in "
+                    "with your password instead."
+                )
+
+            else:
+
+                pin_username = st.text_input("Username", key="pin_login_username")
+                pin_value = st.text_input(
+                    "4-digit PIN", type="password", max_chars=4, key="pin_login_pin"
+                )
+
+                if st.button("Log In with PIN", type="primary", use_container_width=True):
+
+                    pin_error = validate_pin(pin_value)
+
+                    if not pin_username.strip():
+                        st.error("Please enter your username.")
+
+                    elif pin_error:
+                        st.error(pin_error)
+
+                    elif authenticate_with_pin(pin_username, pin_value):
+                        accounts = load_accounts()
+                        account = accounts[pin_username.strip().lower()]
+                        st.session_state.username = account["username"]
+                        st.session_state.pop("pin_attempts", None)
+                        go("dashboard")
+
+                    else:
+                        st.session_state["pin_attempts"] = attempts + 1
+                        remaining = PIN_MAX_ATTEMPTS - st.session_state["pin_attempts"]
+                        if remaining > 0:
+                            st.error(
+                                f"Incorrect username or PIN. {remaining} attempt(s) remaining."
+                            )
+                        else:
+                            st.error(
+                                "Too many incorrect PIN attempts. Please "
+                                "sign in with your password instead."
+                            )
+
+            if st.button("Back to Login", use_container_width=True):
+                st.session_state.pop("pin_attempts", None)
+                go("login")
 
 def show_register():
 
@@ -1392,10 +1521,10 @@ def show_register():
                 key="register_username"
             )
 
-            email = st.text_input(
-                "Email",
-                placeholder="name@example.com",
-                key="register_email"
+            phone = st.text_input(
+                "Phone number",
+                placeholder="81234567",
+                key="register_phone"
             )
 
             password = st.text_input(
@@ -1427,9 +1556,9 @@ def show_register():
                     username
                 )
 
-                # Check email
-                email_error = validate_email(
-                    email
+                # Check phone number
+                phone_error = validate_phone(
+                    phone
                 )
 
                 # Check password strength
@@ -1443,10 +1572,10 @@ def show_register():
                         username_error
                     )
 
-                elif email_error:
+                elif phone_error:
 
                     st.error(
-                        email_error
+                        phone_error
                     )
 
                 elif password_error:
@@ -1466,7 +1595,7 @@ def show_register():
                     created, message = (
                         create_temporary_account(
                             username,
-                            email,
+                            phone,
                             password
                         )
                     )
@@ -2480,6 +2609,11 @@ def show_consultation():
     who = display_name() or "you"
     hero("Consultation Report", "A summary to bring to your appointment. Not medical advice.")
 
+    # Give any record saved before record_id existed one now - this
+    # page's automatic-save idempotency check below depends on every
+    # record having one (see source_record_id further down).
+    data_manager.backfill_record_ids()
+
     # Loaded through the Data Manager - never read the JSON file here.
     all_records = data_manager.load_health_records()
     my_records = records_for_current_user(all_records)
@@ -2503,6 +2637,15 @@ def show_consultation():
     # and build_report() below falls back to the deterministic,
     # rule-based summary rather than fabricating an AI result.
     latest_processed_record = latest_record_for_user(recent_records)
+    # Identifies WHICH health record this consultation summary is being
+    # generated from, so the automatic-save step below can recognise
+    # "this exact summary is already saved" (see
+    # data_manager.find_consultation_pdf_by_source()) instead of saving
+    # a duplicate on every Streamlit rerun.
+    source_record_id = (
+        latest_processed_record.get("record_id") if latest_processed_record else None
+    )
+
     ai_narrative = None
     if latest_processed_record:
         with st.spinner("Preparing your consultation summary..."):
@@ -2538,11 +2681,6 @@ def show_consultation():
             for n in report["notes"]:
                 st.markdown("- " + n)
 
-        if report["questions"]:
-            st.markdown("##### Questions to ask your doctor")
-            for q in report["questions"]:
-                st.markdown("- " + q)
-
     st.write("")
     pdf_bytes, err = build_pdf(who, report)
     report_date = latest_processed_record.get("date") if latest_processed_record else None
@@ -2553,22 +2691,30 @@ def show_consultation():
                            data=report_text(who, report).encode("utf-8"),
                            file_name="consultation_report.txt", mime="text/plain")
     else:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.download_button("Download consultation report (PDF)", data=pdf_bytes,
-                               file_name="consultation_report.pdf",
-                               mime="application/pdf", type="primary")
-        with col2:
-            if st.button("Save to Summary History"):
-                saved_entry = data_manager.save_consultation_pdf(
-                    pdf_bytes=pdf_bytes,
-                    report_date=report_date,
-                    username=current_user(),
+        st.download_button("Download consultation report (PDF)", data=pdf_bytes,
+                           file_name="consultation_report.pdf",
+                           mime="application/pdf", type="primary")
+
+        # Automatic Summary History saving - no button to click. Gated
+        # on source_record_id so repeated Streamlit reruns of the SAME
+        # latest record (a refresh, clicking Download above, navigating
+        # away and back) never create a duplicate entry; a genuinely
+        # new latest record (a new upload) gets its own new entry.
+        existing_entry = data_manager.find_consultation_pdf_by_source(
+            current_user(), source_record_id
+        )
+        if not existing_entry:
+            saved_entry = data_manager.save_consultation_pdf(
+                pdf_bytes=pdf_bytes,
+                report_date=report_date,
+                username=current_user(),
+                source_record_id=source_record_id,
+            )
+            if not saved_entry:
+                st.error(
+                    "This summary could not be saved to Summary History. "
+                    "You can still download it above."
                 )
-                if saved_entry:
-                    st.success("Saved to Summary History below.")
-                else:
-                    st.error("Could not save this summary. Please try again.")
 
     # -------------------------------------------------
     # SUMMARY HISTORY
@@ -2588,7 +2734,7 @@ def show_consultation():
                 with cols[0]:
                     st.caption(f"Report date: {entry.get('report_date') or 'Unknown'}")
                 with cols[1]:
-                    st.caption(f"Generated {entry.get('generated_at', '')}")
+                    st.caption(f"Generated {_format_summary_timestamp(entry.get('generated_at'))}")
                 with cols[2]:
                     pdf_data = data_manager.get_consultation_pdf_bytes(entry["filename"])
                     if pdf_data:
@@ -2612,12 +2758,8 @@ def build_report(who, trends, ai_narrative=None):
     purely from trends' own rule-based classifications, so a missing
     AI result is never silently presented as if it had succeeded.
     """
-    questions, notes = [], []
+    notes = []
     if trends:
-        rising = [t["metric"] for t in trends if t["direction"] == "rising"]
-        if rising:
-            questions.append("Are the upward trends in " + ", ".join(rising)
-                             + " something I should act on?")
         notes.append("Trends are based only on the records provided and are not a "
                      "diagnosis. Please confirm with your doctor.")
 
@@ -2630,7 +2772,7 @@ def build_report(who, trends, ai_narrative=None):
     else:
         summary = ""
 
-    return {"summary": summary, "questions": questions, "notes": notes, "trends": trends}
+    return {"summary": summary, "notes": notes, "trends": trends}
 
 def report_text(who, report):
     lines = ["Consultation Report for " + who,
@@ -2645,9 +2787,7 @@ def report_text(who, report):
                          + "  (" + t["note"] + ")")
         lines.append("")
     if report["notes"]:
-        lines += ["IN PLAIN LANGUAGE"] + ["- " + n for n in report["notes"]] + [""]
-    if report["questions"]:
-        lines += ["QUESTIONS TO ASK YOUR DOCTOR"] + ["- " + q for q in report["questions"]]
+        lines += ["NOTE"] + ["- " + n for n in report["notes"]] + [""]
     return chr(10).join(lines)
 
 def build_pdf(who, report):
@@ -2693,10 +2833,6 @@ def build_pdf(who, report):
             for n in report["notes"]:
                 para("- " + n)
             pdf.ln(2)
-        if report["questions"]:
-            section("Questions to ask your doctor")
-            for q in report["questions"]:
-                para("- " + q)
 
         out = pdf.output()
         if isinstance(out, (bytes, bytearray)):
@@ -2707,14 +2843,14 @@ def build_pdf(who, report):
 
 inject_css()
 
-if st.session_state.page in ("login", "register"):
+if st.session_state.page in ("login", "register", "pin_login"):
 
     # Create the sidebar from the beginning so Streamlit
     # remembers its initial expanded state.
     with st.sidebar:
         st.markdown("")
 
-    # Hide the sidebar while the user is on Login/Register.
+    # Hide the sidebar while the user is on Login/Register/PIN login.
     st.markdown(
         """
         <style>
@@ -2732,6 +2868,8 @@ if st.session_state.page in ("login", "register"):
 
     if st.session_state.page == "login":
         show_login()
+    elif st.session_state.page == "pin_login":
+        show_pin_login()
     else:
         show_register()
 

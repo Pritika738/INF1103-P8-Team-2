@@ -1,60 +1,11 @@
 [
   {
-    "report_id": "8fad8a63a1604e74ae351b76eca46247",
-    "username": "datetest",
-    "report_date": "2026-10-10",
-    "upload_date": "2026-10-10",
-    "filename": "r.png",
-    "stored_filename": "8fad8a63a1604e74ae351b76eca46247.png",
-    "mime_type": "image/png",
-    "content_hash": "d37a21e29078776bf782876ecc3bfd4e66143883ee926183624ba1d0b04c39cc"
-  },
-  {
-    "report_id": "dd761a248a3c45be835e432f8de8408a",
-    "username": "test",
-    "report_date": "2026-10-03",
-    "upload_date": "2026-10-10",
-    "filename": "mock_report_1_athletic_normal.pdf",
-    "stored_filename": "dd761a248a3c45be835e432f8de8408a.pdf",
-    "mime_type": "application/pdf",
-    "content_hash": "68de36666c7020f60fff494610eb36ea527c19f77882d80d68589cdcdc07e710"
-  },
-  {
-    "report_id": "6d78084ec0ca499a969a321d9271b0bc",
-    "username": "test",
-    "report_date": "2026-10-06",
-    "upload_date": "2026-10-10",
-    "filename": "757c11ff-1066-4615-a24e-92b3508c6356.jpg",
-    "stored_filename": "6d78084ec0ca499a969a321d9271b0bc.jpg",
-    "mime_type": "image/jpeg",
-    "content_hash": "24569c3de9795e5ab45f3cd240f210f686b718f66c8c409d81a113da4a12d3fd"
-  },
-  {
-    "report_id": "2545abc41f1447f4a5f40e6f9e7023fc",
-    "username": "test",
-    "report_date": "2026-08-05",
-    "upload_date": "2026-10-10",
-    "filename": "mock_report_2_mildly_elevated.pdf",
-    "stored_filename": "2545abc41f1447f4a5f40e6f9e7023fc.pdf",
-    "mime_type": "application/pdf",
-    "content_hash": "5aaa71168220b84b1be163e43cfe84c9670a0a0af3fb0b0cccf6ea041f8b4f65"
-  },
-  {
-<<<<<<< Updated upstream
-    "report_id": "e4af057f60a349738cc60416f65a4758",
-    "username": "test",
-    "report_date": "2026-09-22",
-    "upload_date": "2026-10-13",
-    "filename": "mock_report_severe.pdf",
-    "stored_filename": "e4af057f60a349738cc60416f65a4758.pdf",
-=======
-    "report_id": "38f84e54044c497cb589dc8147f4074b",
+    "report_id": "ebb1abb1dd90493db52bff9ad631870a",
     "username": "tester2008",
     "report_date": "2026-09-22",
     "upload_date": "2026-10-13",
     "filename": "mock_report_severe.pdf",
-    "stored_filename": "38f84e54044c497cb589dc8147f4074b.pdf",
->>>>>>> Stashed changes
+    "stored_filename": "ebb1abb1dd90493db52bff9ad631870a.pdf",
     "mime_type": "application/pdf",
     "content_hash": "125f0c7edd8c6caadc7ae3e7feed822b2040b646f6adedd56b01097b253977cf"
   }
