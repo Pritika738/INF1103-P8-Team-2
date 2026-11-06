@@ -753,7 +753,9 @@ class LogicManager:
 
     # ----- the polymorphic evaluation loop (the heart of the refactor) ----
     def evaluate(self, current_metrics: Dict[str, Optional[float]],
-                 historical_records: List[Dict[str, Any]]) -> List[Finding]:
+                 historical_records: List[Dict[str, Any]],
+                 skip_missing: bool = False) -> List[Finding]:
+
         """
         Run every rule over every applicable reading. No type checks on
         the rules - each is asked, uniformly, to evaluate(). Returns all
@@ -763,7 +765,7 @@ class LogicManager:
         for rule in self._rules:
             metric_key = rule.spec.key
             current_value = current_metrics.get(metric_key)
-            history_values = self._history_values(historical_records, metric_key)
+            history_values = self._history_values(historical_records, metric_key, skip_missing)
             finding = rule.evaluate(current_value, history_values)
             if finding is not None:
                 findings.append(finding)
