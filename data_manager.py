@@ -37,9 +37,10 @@ persisted, not a medical judgment, so it stays in scope here.
 
 import uuid
 from datetime import date as _date
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from config import LATEST_REPORTS_LIMIT
+from config import LATEST_REPORTS_LIMIT, MANUAL_VITALS_FILE
 from data_layer import (
     ConsultationPdfArchive,
     JsonRecordRepository,
@@ -58,14 +59,24 @@ __all__ = [
 class DataManager:
     """Single entry point to every kind of stored data."""
 
-    def __init__(self, records: RecordRepository,
+    def _init_(self, records: RecordRepository,
                  consultation_pdfs: ConsultationPdfArchive,
                  original_reports: OriginalReportArchive,
-                 medical_profiles: MedicalProfileStore):
+                 medical_profiles: MedicalProfileStore,
+                 manual_vitals: Optional[RecordRepository] = None):
         self._records = records                      # aggregation: all injected
         self._consultation_pdfs = consultation_pdfs
         self._original_reports = original_reports
         self._medical_profiles = medical_profiles
+        # Self-logged vitals use the SAME repository class as report
+        # records, just pointed at a different file - so they are stored
+        # completely apart from health_records.json. Optional so existing
+        # callers (and tests) that build a DataManager with four
+        # arguments keep working unchanged.
+        self._manual_vitals = (
+            manual_vitals if manual_vitals is not None
+            else JsonRecordRepository(MANUAL_VITALS_FILE)
+        )
 
     @classmethod
     def create(cls) -> "DataManager":
@@ -75,7 +86,52 @@ class DataManager:
             ConsultationPdfArchive(),
             OriginalReportArchive(),
             MedicalProfileStore(),
+            JsonRecordRepository(MANUAL_VITALS_FILE),
         )
+
+        # ------------------------------------------------------------------
+    # Self-logged vitals (entered by hand, not from a medical report)
+    # ------------------------------------------------------------------
+
+    def save_manual_vital(self, entry: dict) -> Optional[dict]:
+        """Save one self-logged vitals entry, preserving every earlier one.
+
+        A unique "record_id" and a "logged_at" timestamp are stamped onto
+        a copy (the caller's dict is never mutated). Returns the saved
+        entry, or None if the write failed.
+        """
+        entry_to_save = dict(entry)
+        entry_to_save.setdefault("record_id", uuid.uuid4().hex)
+        entry_to_save.setdefault("logged_at", datetime.now().isoformat(timespec="seconds"))
+
+        entries = self._manual_vitals.load_all()
+        entries.append(entry_to_save)
+        return entry_to_save if self._manual_vitals.save_all(entries) else None
+
+    def list_manual_vitals(self, username: str) -> List[dict]:
+        """One user's self-logged vitals, sorted oldest to newest by the
+        date (and time, if given) they were MEASURED - not when typed in.
+        Entries measured at the same moment keep their save order."""
+        mine = [
+            (index, e) for index, e in enumerate(self._manual_vitals.load_all())
+            if e.get("username") == username
+        ]
+        mine.sort(key=lambda pair: (pair[1].get("date") or "",
+                                    pair[1].get("time") or "", pair[0]))
+        return [e for _, e in mine]
+
+    def delete_manual_vital(self, username: str, record_id: str) -> bool:
+        """Delete one self-logged entry by its record_id. Only the owner's
+        own entry can be deleted. Returns True if one was found and the
+        save succeeded, False otherwise."""
+        entries = self._manual_vitals.load_all()
+        kept = [
+            e for e in entries
+            if not (e.get("record_id") == record_id and e.get("username") == username)
+        ]
+        if len(kept) == len(entries):
+            return False
+        return self._manual_vitals.save_all(kept)
 
     # ------------------------------------------------------------------
     # Health records
