@@ -1,5 +1,5 @@
 ﻿"""
-ai/prompts.py
+ai_layer/prompts.py
 
 Prompt text for every AI task. Building prompts is the only job of
 this module: no API calls, parsing or business rules.

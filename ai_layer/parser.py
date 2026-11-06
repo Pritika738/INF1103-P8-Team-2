@@ -1,5 +1,5 @@
 """
-ai/parser.py
+ai_layer/parser.py
 
 Turns raw model text into a Python dict. Parsing only - it does not
 judge the contents (that is each AITask's validate()).
