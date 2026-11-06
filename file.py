@@ -87,7 +87,24 @@ class ExtractedFile:
             blood_glucose=ai_result["blood_glucose"],
             report_date=ai_result["report_date"],
         )
-
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ExtractedFile":
+        """Rebuild an ExtractedFile from the dict produced by to_dict()."""
+        if not isinstance(data, dict):
+            raise TypeError("data must be a dict.")
+        metrics = data.get("metrics") or {}
+        return cls(
+            source=data.get("source"),
+            mime_type=data.get("mime_type"),
+            is_medical_report=data.get("is_medical_report", False),
+            classification_reason=data.get("classification_reason", ""),
+            heart_rate=metrics.get("heart_rate"),
+            blood_pressure_systolic=metrics.get("blood_pressure_systolic"),
+            blood_pressure_diastolic=metrics.get("blood_pressure_diastolic"),
+            blood_glucose=metrics.get("blood_glucose"),
+            report_date=data.get("date"),
+        )
     # ------------------------------------------------------------------
     # Read-only access
     # ------------------------------------------------------------------
