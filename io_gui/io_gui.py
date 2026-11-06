@@ -1074,6 +1074,8 @@ def sidebar_nav():
             go("history")
         if st.button("Health Trends", use_container_width=True):
             go("trends")
+        if st.button("My Vitals", use_container_width=True):
+            go("vitals")
         if st.button("Consultation", use_container_width=True):
             go("consultation")
         if st.button("Medical Profile", use_container_width=True):
@@ -3572,6 +3574,9 @@ else:
 
     elif st.session_state.page == "trends":
         show_trends()
+
+    elif st.session_state.page == "vitals":
+        show_vitals()
 
     elif st.session_state.page == "consultation":
         show_consultation()
