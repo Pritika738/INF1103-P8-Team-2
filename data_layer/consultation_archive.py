@@ -5,29 +5,43 @@ Generated consultation-summary PDFs: the file on disk plus its
 metadata. Never touches health_records.json - pruning old summaries can
 never delete a medical record.
 
-ConsultationPdfArchive owns a JsonListStore for its metadata
-(composition - the store has no purpose outside this archive).
+The PDF files themselves stay on disk in pdf_dir; only their metadata
+goes in the metadata store. By default that is the
+"consultation_summaries" table of the app database; any object with
+load() -> list / save(list) -> bool works (e.g. a JsonListStore in tests
+or for migrating the old consultation_summaries.json).
 """
 
 import os
 from datetime import datetime as _datetime
 from typing import List, Optional
 
-from config import CONSULTATION_PDF_DIR, CONSULTATION_SUMMARIES_FILE, MAX_RETAINED_SUMMARY_PDFS
+from config import CONSULTATION_PDF_DIR, DATABASE_FILE, MAX_RETAINED_SUMMARY_PDFS
 
 from .filenames import safe_filename_component
-from .json_store import JsonListStore
+from .sqlite_list_store import SqliteListStore
+
+
+def consultation_summaries_table(db_path: str = DATABASE_FILE) -> SqliteListStore:
+    """The SQLite table that holds consultation-summary metadata."""
+    return SqliteListStore(
+        db_path,
+        "consultation_summaries",
+        ("username", "source_record_id", "report_date", "generated_at", "filename", "pdf_path"),
+        indexes=(("username",), ("username", "source_record_id")),
+    )
 
 
 class ConsultationPdfArchive:
     """Saves, lists and retrieves generated consultation-summary PDFs."""
 
     def __init__(self, pdf_dir: str = CONSULTATION_PDF_DIR,
-                 summaries_file: str = CONSULTATION_SUMMARIES_FILE,
+                 metadata_store=None,
                  max_retained: Optional[int] = MAX_RETAINED_SUMMARY_PDFS):
         self._pdf_dir = pdf_dir
         self._max_retained = max_retained
-        self.__store = JsonListStore(summaries_file)  # composition
+        # None -> the real database table (built per instance, never shared).
+        self.__store = metadata_store if metadata_store is not None else consultation_summaries_table()
 
     def save(self, pdf_bytes: bytes, report_date, username: str,
               source_record_id=None) -> Optional[dict]:

@@ -44,8 +44,8 @@ def make_manager(paths):
     def _make(max_retained=None):
         return DataManager(
             JsonRecordRepository(paths["records"]),
-            ConsultationPdfArchive(paths["pdfs"], paths["summaries"], max_retained),
-            OriginalReportArchive(paths["reports"], paths["meta"]),
+            ConsultationPdfArchive(paths["pdfs"], JsonListStore(paths["summaries"]), max_retained),
+            OriginalReportArchive(paths["reports"], JsonListStore(paths["meta"])),
             MedicalProfileStore(paths["profiles"]),
             JsonAccountRepository(paths["accounts"]),
         )
@@ -93,8 +93,8 @@ class TestDesign:
         # Liskov: swapping the backend needs no DataManager changes.
         dm = DataManager(
             InMemoryRepository(),
-            ConsultationPdfArchive(paths["pdfs"], paths["summaries"]),
-            OriginalReportArchive(paths["reports"], paths["meta"]),
+            ConsultationPdfArchive(paths["pdfs"], JsonListStore(paths["summaries"])),
+            OriginalReportArchive(paths["reports"], JsonListStore(paths["meta"])),
             MedicalProfileStore(paths["profiles"]),
             JsonAccountRepository(paths["accounts"]),
         )
@@ -331,7 +331,7 @@ class TestConsultationPdfs:
     def test_save_fails_cleanly_when_the_folder_cannot_be_created(self, tmp_path, paths):
         blocker = tmp_path / "blocker"
         blocker.write_text("file", encoding="utf-8")
-        archive = ConsultationPdfArchive(str(blocker / "pdfs"), paths["summaries"])
+        archive = ConsultationPdfArchive(str(blocker / "pdfs"), JsonListStore(paths["summaries"]))
         assert archive.save(b"x", "2026-01-01", "ann") is None
 
     def test_corrupt_metadata_file_does_not_crash_listing(self, dm, paths):
@@ -403,7 +403,7 @@ class TestOriginalReports:
     def test_save_fails_cleanly_when_the_folder_cannot_be_created(self, tmp_path, paths):
         blocker = tmp_path / "blocker"
         blocker.write_text("file", encoding="utf-8")
-        archive = OriginalReportArchive(str(blocker / "reports"), paths["meta"])
+        archive = OriginalReportArchive(str(blocker / "reports"), JsonListStore(paths["meta"]))
         assert archive.save(b"x", "a.pdf", "application/pdf", None, "ann") is None
 
     def test_upload_date_is_recorded(self, dm):

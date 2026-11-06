@@ -27,14 +27,16 @@ DATABASE_FILE = os.path.join(DATA_DIR, "app.db")
 USERS_FILE = os.path.join(DATA_DIR, "users.json")
 
 # Generated consultation-summary PDFs (separate from uploaded medical
-# reports) and the JSON file tracking their metadata.
+# reports). Their metadata now lives in the "consultation_summaries" table
+# of DATABASE_FILE; the JSON file is kept only as the migration source.
 CONSULTATION_PDF_DIR = os.path.join(DATA_DIR, "consultation_pdfs")
 CONSULTATION_SUMMARIES_FILE = os.path.join(DATA_DIR, "consultation_summaries.json")
 
 # Original uploaded medical report files (the actual PDF/image the user
-# uploaded, kept verbatim) and the JSON file tracking their metadata -
-# completely separate from both health_records.json (extracted values)
-# and the consultation-summary PDFs above (AI Manager's own output).
+# uploaded, kept verbatim) - completely separate from both the health
+# records (extracted values) and the consultation-summary PDFs above (AI
+# Manager's own output). Their metadata now lives in the "original_reports"
+# table of DATABASE_FILE; the JSON file is kept only as the migration source.
 ORIGINAL_REPORTS_DIR = os.path.join(DATA_DIR, "original_reports")
 ORIGINAL_REPORTS_FILE = os.path.join(DATA_DIR, "original_reports.json")
 MEDICAL_PROFILES_FILE = os.path.join(DATA_DIR, "medical_profiles.json")
