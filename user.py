@@ -8,19 +8,16 @@ _EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 class User:
     """A user, identified by a unique username."""
 
-    def __init__(self, username: str, email: Optional[str] = None):
+    def __init__(self, username: str):
         username = (username or "").strip()
         if not username:
             raise ValueError("username must not be empty.")
-        if email is not None and not _EMAIL_PATTERN.match(email):
-            raise ValueError("email is not a valid address.")
 
         self.__username = username            # identity: read-only
-        self.__email = email
         self.__files: List[ExtractedFile] = []  # aggregation
 
     # ------------------------------------------------------------------
-    # Read-only identity, editable email
+    # Read-only identity
     # ------------------------------------------------------------------
 
     @property
@@ -58,13 +55,13 @@ class User:
     # Conversion
     # ------------------------------------------------------------------
 
-    def to_dict(self) -> Dict[str, Optional[str]]:
+    def to_dict(self) -> Dict[str, str]:
         """Profile only (files are stored separately by the Data Manager)."""
-        return {"username": self.__username, "email": self.__email}
+        return {"username": self.__username}
 
     @classmethod
     def from_dict(cls, data: dict) -> "User":
-        return cls(data.get("username"), data.get("email"))
+         return cls(data.get("username"))
 
     def __eq__(self, other) -> bool:
         return isinstance(other, User) and other.username == self.__username
