@@ -35,6 +35,11 @@ class User:
         """A copy, so callers cannot modify the internal list directly."""
         return list(self.__files)
 
+    @property
+    def file_count(self) -> int:
+        """How many files this user has."""
+        return len(self.__files)
+
     def add_file(self, extracted_file: ExtractedFile) -> None:
         """Attach a file to this user. Rejects non-files and duplicates."""
         if not isinstance(extracted_file, ExtractedFile):
@@ -42,6 +47,13 @@ class User:
         if extracted_file in self.__files:
             raise ValueError(f"{extracted_file.source!r} has already been added.")
         self.__files.append(extracted_file)
+
+    def remove_file(self, source: str) -> ExtractedFile:
+        """Detach the file with this source and return it."""
+        for index, extracted_file in enumerate(self.__files):
+            if extracted_file.source == source:
+                return self.__files.pop(index)
+        raise ValueError(f"No file with source {source!r}.")
 
     def files_by_date(self) -> List[ExtractedFile]:
         """Files with a known report date, oldest first."""
