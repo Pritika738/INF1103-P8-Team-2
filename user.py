@@ -1,8 +1,5 @@
-import re
-from typing import Dict, List, Optional
+from typing import Dict, List
 from file import ExtractedFile
-
-_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class User:
@@ -23,16 +20,6 @@ class User:
     @property
     def username(self) -> str:
         return self.__username
-
-    @property
-    def email(self) -> Optional[str]:
-        return self.__email
-
-    @email.setter
-    def email(self, value: Optional[str]) -> None:
-        if value is not None and not _EMAIL_PATTERN.match(value):
-            raise ValueError("email is not a valid address.")
-        self.__email = value
 
     # ------------------------------------------------------------------
     # Files belonging to this user
