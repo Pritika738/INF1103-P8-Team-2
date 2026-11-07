@@ -36,6 +36,11 @@ class User:
         return list(self.__files)
 
     def add_file(self, extracted_file: ExtractedFile) -> None:
+        """Attach a file to this user. Rejects non-files and duplicates."""
+        if not isinstance(extracted_file, ExtractedFile):
+            raise TypeError("add_file expects an ExtractedFile object.")
+        if extracted_file in self.__files:
+            raise ValueError(f"{extracted_file.source!r} has already been added.")
         self.__files.append(extracted_file)
 
     def files_by_date(self) -> List[ExtractedFile]:
