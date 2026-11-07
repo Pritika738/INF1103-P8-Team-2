@@ -167,3 +167,31 @@ def test_properties_are_read_only(report):
 def test_metrics_returns_a_copy(report):
     report.metrics["heart_rate"] = 999
     assert report.metrics["heart_rate"] == 72
+
+
+# ---------------------------------------------------------------------------
+# Equality and hashing
+# ---------------------------------------------------------------------------
+
+def test_files_with_same_source_are_equal():
+    a = ExtractedFile("a.pdf", "application/pdf", heart_rate=72)
+    b = ExtractedFile("a.pdf", "application/pdf")
+    assert a == b
+    assert hash(a) == hash(b)
+
+
+def test_files_with_different_source_are_not_equal():
+    assert ExtractedFile("a.pdf", "application/pdf") != ExtractedFile("c.png", "image/png")
+
+
+def test_file_is_not_equal_to_other_types():
+    assert ExtractedFile("a.pdf", "application/pdf") != "a.pdf"
+
+
+def test_set_removes_duplicate_files():
+    files = {
+        ExtractedFile("a.pdf", "application/pdf"),
+        ExtractedFile("a.pdf", "application/pdf"),
+        ExtractedFile("c.png", "image/png"),
+    }
+    assert len(files) == 2

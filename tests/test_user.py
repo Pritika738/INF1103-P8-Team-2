@@ -128,3 +128,38 @@ def test_file_count_is_read_only(user):
 
 def test_to_dict_contains_username_only(user):
     assert user.to_dict() == {"username": "Alice"}
+
+
+def test_files_returns_a_copy(user):
+    user.add_file(make_file("a.pdf"))
+    user.files.append(make_file("sneaky.pdf"))
+    user.files.clear()
+    assert user.file_count == 1
+
+
+def test_files_by_date_sorts_oldest_first_and_skips_undated(user):
+    user.add_file(make_file("mar.pdf", "2026-03-01"))
+    user.add_file(make_file("undated.pdf"))
+    user.add_file(make_file("jan.pdf", "2026-01-15"))
+    assert [f.source for f in user.files_by_date()] == ["jan.pdf", "mar.pdf"]
+
+
+def test_medical_files_keeps_only_reports_with_readings(user):
+    user.add_file(make_file("lab.pdf"))
+    user.add_file(make_file("selfie.jpg", medical=False))
+    user.add_file(make_file("letter.pdf", heart_rate=None))
+    assert [f.source for f in user.medical_files()] == ["lab.pdf"]
+
+
+def test_to_dict_from_dict_round_trip(user):
+    assert User.from_dict(user.to_dict()) == user
+
+
+def test_from_dict_ignores_old_email_key():
+    u = User.from_dict({"username": "bob", "email": "bob@example.com"})
+    assert u.to_dict() == {"username": "bob"}
+
+
+def test_from_dict_without_username_is_rejected():
+    with pytest.raises(ValueError):
+        User.from_dict({})
