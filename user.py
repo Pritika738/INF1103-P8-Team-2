@@ -60,6 +60,10 @@ class User:
         dated = [f for f in self.__files if f.report_date]
         return sorted(dated, key=lambda f: f.report_date)
 
+    def medical_files(self) -> List[ExtractedFile]:
+        """Files that are real medical reports with at least one reading."""
+        return [f for f in self.__files
+                if f.is_medical_report and f.has_measurements()]
     # ------------------------------------------------------------------
     # Conversion
     # ------------------------------------------------------------------
