@@ -21,6 +21,11 @@ class User:
     def username(self) -> str:
         return self.__username
 
+    @property
+    def key(self) -> str:
+        """Lowercase username, matching how accounts are keyed in users.json."""
+        return self.__username.lower()
+
     # ------------------------------------------------------------------
     # Files belonging to this user
     # ------------------------------------------------------------------
@@ -48,13 +53,16 @@ class User:
 
     @classmethod
     def from_dict(cls, data: dict) -> "User":
-         return cls(data.get("username"))
+        return cls(data.get("username"))
 
-    def __eq__(self, other) -> bool:
-        return isinstance(other, User) and other.username == self.__username
+    def __eq__(self, other: object) -> bool:
+        """Usernames are case-insensitive: 'Alice' and 'alice' are the same user."""
+        if not isinstance(other, User):
+            return NotImplemented
+        return self.key == other.key
 
     def __hash__(self) -> int:
-        return hash(self.__username)
+        return hash(self.key)
 
     def __repr__(self) -> str:
         return f"User(username={self.__username!r})"
