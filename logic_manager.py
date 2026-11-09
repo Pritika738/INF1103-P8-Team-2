@@ -906,19 +906,26 @@ class LogicManager:
             "summary": summary,
         }
 
-def process_manual_reading(self, current_metrics: Dict[str, Optional[float]],
-                               previous_entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def process_manual_reading(
+        self,
+        current_metrics: Dict[str, Optional[float]],
+        previous_entries: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """
-        Evaluate one self-logged vitals entry (already validated by
-        ManualVitalsValidator) against the user's EARLIER self-logged
-        entries only - never against medical-report history, so the two
-        stay separate. ⁠ previous_entries ⁠ must be sorted oldest to newest.
+        Evaluate one self-logged vitals entry against the user's
+        earlier self-logged entries only.
+        """
+        findings = self.evaluate(
+            current_metrics,
+            previous_entries,
+            skip_missing=True
+        )
 
-        Uses the same rules and output shape as process(), so the same
-        UI helpers can display it.
-        """
-        findings = self.evaluate(current_metrics, previous_entries, skip_missing=True)
-        return self._finalise(current_metrics, None, findings)
+        return self._finalise(
+            current_metrics,
+            None,
+            findings
+        )
 
 # ===========================================================================
 # Backwards-compatibility shims
