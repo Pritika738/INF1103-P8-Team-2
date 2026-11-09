@@ -1238,26 +1238,28 @@ def create_temporary_account(
 def authenticate_temporary_account(
     username: str,
     password: str
-) -> bool:
+) -> User | None:
+    """
+    Return the matching User if the username and password are correct,
+    otherwise None.
+    """
 
-    username_key = username.strip().lower()
+    user = data_service.find_user(username)
 
-    accounts = load_accounts()
+    if user is None:
+        return None
 
-    account = accounts.get(username_key)
-
-    if account is None:
-        return False
+    account = data_service.get_account(user)
 
     entered_hash = hash_password(
         password,
         account["salt"]
     )
 
-    return hmac.compare_digest(
-        entered_hash,
-        account["password_hash"]
-    )
+    if hmac.compare_digest(entered_hash, account["password_hash"]):
+        return user
+
+    return None
 
 # =========================================================
 # QUICK-LOGIN PIN
@@ -1508,10 +1510,10 @@ def show_login():
                         "Please enter your password."
                     )
 
-                elif not authenticate_temporary_account(
+                elif (user := authenticate_temporary_account(
                     username,
                     password
-                ):
+                )) is None:
 
                     st.error(
                         "Incorrect username or password."
@@ -1519,18 +1521,9 @@ def show_login():
 
                 else:
 
-                    accounts = load_accounts()
-
-                    account = accounts[
-                        username.strip().lower()
-                    ]
-
-                    st.session_state.username = account[
-                        "username"
-                    ]
+                    st.session_state.username = user.username
 
                     go("dashboard")
-
             st.caption(
                 "Don't have an account?"
             )
