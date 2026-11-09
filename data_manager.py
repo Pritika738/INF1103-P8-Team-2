@@ -55,6 +55,8 @@ from data_layer import (
     default_medical_profile,
 )
 
+from user import User
+
 __all__ = [
     "DataManager", "RecordRepository", "JsonRecordRepository", "SqliteRecordRepository",
     "ConsultationPdfArchive", "OriginalReportArchive", "MedicalProfileStore",
@@ -159,6 +161,15 @@ class DataManager:
     def save_accounts(self, accounts: Dict[str, dict]) -> bool:
         """Replace the stored accounts. Returns True on success, False if the write failed."""
         return self._accounts.save_all(accounts)
+
+    def find_user(self, username: str) -> Optional[User]:
+        """The registered User with this username (any letter case), or None."""
+        try:
+            key = User(username).key
+        except ValueError:  # a blank username can never match an account
+            return None
+        account = self._accounts.load_all().get(key)
+        return User.from_dict(account) if account else None
 
     # ------------------------------------------------------------------
     # Health records
