@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 import json
 import os
 import re
@@ -3677,6 +3677,11 @@ def show_consultation():
     if latest_processed_record:
         with st.spinner("Preparing your consultation summary..."):
             ai_narrative = ai_service.generate_narrative(latest_processed_record)
+            # Enforce the "never diagnose/prescribe" safety rule on the
+            # AI-written narrative before it is ever shown. The guardrail
+            # lives on (and is owned by) the Logic Manager; this is the
+            # point where it is actually applied.
+            ai_narrative = logic_manager.apply_safety_guardrail(ai_narrative)
 
     report = build_report(
         who,

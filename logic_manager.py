@@ -174,6 +174,25 @@ class LogicManager:
             rules.append(PersistentTrendRule(spec))
             rules.append(RecentChangeRule(spec))
         return cls(rules)
+
+    # ----- safety -------------------------------------------------------
+    def apply_safety_guardrail(self, ai_text: Optional[str]) -> Optional[str]:
+        """
+        Pass any free-text AI explanation (e.g. the consultation
+        narrative Gemini writes) through this manager's SafetyGuardrail
+        before it is shown to a user. If the text contains prohibited
+        diagnostic/prescriptive language it is replaced with a safe
+        override message; otherwise it is returned unchanged. None/empty
+        is passed through so the caller can still fall back to the
+        deterministic, rule-based summary.
+
+        This is the single point where the guardrail the manager owns is
+        actually applied, so the "never diagnose" rule is enforced on
+        AI-generated text rather than merely available.
+        """
+        if not ai_text:
+            return ai_text
+        return self._guardrail.enforce(ai_text)
 # ----- shape helpers (same behaviour as the old module functions) -----
     @staticmethod
     def _flatten_ai_metrics(ai_extracted: Optional[Dict[str, Any]]) -> Dict[str, Optional[float]]:
@@ -436,6 +455,16 @@ def validate_medical_profile(profile):
 def enforce_safety_guardrails(ai_explanation):
     """Backwards-compatible shim -> SafetyGuardrail.enforce()."""
     return _default_guardrail.enforce(ai_explanation)
+
+
+def apply_safety_guardrail(ai_text):
+    """Shim -> LogicManager.apply_safety_guardrail() on the shared manager.
+
+    Routes through the manager (not the guardrail directly) so the
+    guardrail the LogicManager owns is the one that runs - which is what
+    makes the "never diagnose" rule enforced, not merely available.
+    """
+    return _default_logic_manager.apply_safety_guardrail(ai_text)
 
 # ==========================================
 # DEMO (local execution only)
