@@ -41,17 +41,6 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from config import LATEST_REPORTS_LIMIT, MANUAL_VITALS_FILE
-from data_layer import (
-    AccountRepository,
-    ConsultationPdfArchive,
-    JsonRecordRepository,
-    MedicalProfileStore,
-    OriginalReportArchive,
-    RecordRepository,
-    SqliteAccountRepository,
-    SqliteRecordRepository,
-    default_medical_profile,
-)
 
 from data_layer import (
     AccountRepository,
