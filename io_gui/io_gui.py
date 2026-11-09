@@ -3614,10 +3614,13 @@ def show_consultation():
         else None
     )
 
-    if not my_records:
+    if not my_records and not manual_vitals:
         with st.container(border=True):
-            st.markdown("### No report to prepare")
-            st.write("Add some medical records first, then generate your summary here.")
+            st.markdown("### No information to prepare")
+            st.write(
+                "Add a medical report or log some readings "
+                "in My Vitals first."
+            )
         return
 
     # Consultation preparation only uses the latest N report dates (see
