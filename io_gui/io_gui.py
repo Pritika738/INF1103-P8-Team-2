@@ -3693,7 +3693,7 @@ def show_consultation():
                     "<div>" + severity_badge(t["severity"]) + "</div></div>",
                     unsafe_allow_html=True,
                 )
-                
+
         if report.get("manual_vital_trends"):
 
             st.divider()
@@ -4052,60 +4052,3 @@ else:
                                   # ← ADD THIS
     else:
         show_dashboard()
-
-        if report["manual_vital_trends"]:
-
-            st.divider()
-
-            st.markdown(
-                "##### My Vitals — Self-logged readings"
-            )
-
-            st.caption(
-                "Based on readings you logged yourself during "
-                "the last 30 days. These are kept separate from "
-                "measurements extracted from medical reports."
-            )
-
-            for t in report["manual_vital_trends"]:
-
-                st.markdown(
-                    "<div style='display:flex;"
-                    "justify-content:space-between;"
-                    "align-items:center;"
-                    "padding:10px 14px;"
-                    "background:var(--surface);"
-                    "border:1px solid var(--border-soft);"
-                    "border-radius:16px;"
-                    "margin-bottom:7px;'>"
-                    "<div>"
-                    "<b style='color:var(--text-strong);'>"
-                    + t["metric"]
-                    + "</b><br>"
-                    "<span style='color:var(--text-muted);"
-                    "font-size:0.85rem;'>"
-                    + t["note"]
-                    + "</span></div>"
-                    "<div>"
-                    + severity_badge(t["severity"])
-                    + "</div></div>",
-                    unsafe_allow_html=True,
-                )
-
-            latest_manual = report.get(
-                "latest_manual_vital"
-            )
-
-            if (
-                latest_manual
-                and latest_manual.get(
-                    "requires_doctor_review"
-                )
-            ):
-
-                st.warning(
-                    latest_manual.get(
-                        "recommended_action",
-                        ""
-                    )
-                )
