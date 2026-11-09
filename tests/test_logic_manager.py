@@ -141,3 +141,45 @@ def test_persistent_trend_defers_to_urgent():
 def test_persistent_trend_needs_two_history_points():
     rule = PersistentTrendRule(SystolicBloodPressure())
     assert rule.evaluate(150, [142]) is None  # only one prior reading
+
+
+# ---------------------------------------------------------------------------
+# RecentChangeRule - compares the current reading to the single most
+# recent past reading. Silent when the change is within tolerance AND no
+# classification boundary was crossed; otherwise reports a CHANGED finding.
+# ---------------------------------------------------------------------------
+
+def test_recent_change_silent_within_tolerance():
+    rule = RecentChangeRule(HeartRate())  # tolerance = 5
+    # delta of 3 bpm, both readings NORMAL -> ignored as fluctuation
+    assert rule.evaluate(88, [85]) is None
+
+
+def test_recent_change_fires_when_delta_exceeds_tolerance():
+    rule = RecentChangeRule(HeartRate())  # tolerance = 5
+    finding = rule.evaluate(95, [85])  # delta 10 > 5
+    assert finding is not None
+    assert finding.status == "CHANGED"
+
+
+def test_recent_change_fires_on_classification_change_even_if_small():
+    # Small numeric delta but crosses the ELEVATED/SEVERE boundary (130).
+    rule = RecentChangeRule(HeartRate())  # tolerance = 5
+    finding = rule.evaluate(131, [129])  # delta 2 (within tol) but class changed
+    assert finding is not None
+    assert finding.status == "CHANGED"
+    d = finding.to_dict()
+    assert d["classification_changed"] is True
+
+
+def test_recent_change_silent_without_history():
+    rule = RecentChangeRule(HeartRate())
+    assert rule.evaluate(120, []) is None
+
+
+def test_recent_change_improvement_is_labelled():
+    rule = RecentChangeRule(HeartRate())
+    # a decrease for a 'higher is worse' metric is an improvement
+    finding = rule.evaluate(85, [120])  # delta -35
+    assert finding is not None
+    assert finding.to_dict()["assessment"] == "improved"
