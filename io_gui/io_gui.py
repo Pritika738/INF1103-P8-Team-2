@@ -1578,6 +1578,13 @@ def show_login():
 
                 go("register")
 
+            if st.button(
+                "Quick Login with PIN",
+                width="stretch"
+            ):
+
+                go("pin_login")
+
 # --- Quick login with PIN -------------------------------------
         # A convenience shortcut for users who have already set a
         # 4-digit PIN (see show_settings()). Requires the username too,
