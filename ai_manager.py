@@ -27,6 +27,7 @@ from ai_layer import (
     ExtractionTask, VerificationTask, NarrativeTask,
 )
 from config import AI_MAX_RETRIES
+from file import ExtractedFile
 
 __all__ = ["AIManager", "AIClient", "AIServiceError", "GeminiClient", "MockAIClient"]
 
@@ -110,7 +111,22 @@ class AIManager:
             return verified
 
         return None
+    
+    def extract_file(self, file_bytes: bytes, mime_type: str,
+                     source: str) -> Optional[ExtractedFile]:
+        """extract_report(), returned as a validated ExtractedFile.
 
+        None if the AI could not produce a result, or if the result breaks
+        ExtractedFile's rules (e.g. a negative or non-finite reading).
+        """
+        ai_result = self.extract_report(file_bytes, mime_type)
+        if ai_result is None:
+            return None
+        try:
+            return ExtractedFile.from_ai_result(source, mime_type, ai_result)
+        except ValueError:
+            return None
+        
     def verify_source(self, file_bytes: bytes, mime_type: str, parsed: dict) -> bool:
         """True only if every non-null value in `parsed` is confirmed by the report."""
         results = self._check_source_verification(file_bytes, mime_type, parsed)
