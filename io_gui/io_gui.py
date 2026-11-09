@@ -1224,14 +1224,6 @@ def create_temporary_account(
     if username_key in accounts:
         return (False, "That username is already taken.")
 
-    # Check duplicate phone number
-    for account in accounts.values():
-        if account.get("phone", "") == phone:
-            return (
-                False,
-                "An account already exists with this phone number."
-            )
-
     # Create random salt for password hashing
     salt = secrets.token_hex(16)
 
