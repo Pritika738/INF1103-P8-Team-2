@@ -303,12 +303,16 @@ class TestExtractReport:
         client = MockAIClient([AIServiceError("timeout"), extraction_json()])
         assert AIManager(client, max_retries=2).extract_report(b"x", PDF) is not None
 
-    def test_invented_value_exhausts_retries(self):
+    def test_unverified_value_is_discarded(self):
         ext = extraction_json(blood_glucose=5.5)
         ver = json.dumps({"blood_glucose_supported": False})
-        client = MockAIClient([ext, ver] * 3)
-        assert AIManager(client, max_retries=3).extract_report(b"x", PDF) is None
-        assert len(client.calls) == 6  # 3 attempts x (extract + verify)
+        client = MockAIClient([ext, ver])
+
+        result = AIManager(client, max_retries=3).extract_report(b"x", PDF)
+
+        assert result is not None
+        assert result["blood_glucose"] is None
+        assert len(client.calls) == 2
 
     def test_not_a_medical_report_returns_immediately(self):
         client = MockAIClient([NOT_MEDICAL])
@@ -463,7 +467,7 @@ class TestGeminiClient:
             503, {"error": {"message": "busy", "status": "UNAVAILABLE"}})
         sdk, fake = _patched_sdk(side_effect=[busy, MagicMock(text='{"a": 1}')])
         with sdk:
-            assert _gemini().generate("prompt", b"b", PDF) == '{"a": 1}'
+            assert _gemini().generate("prompt", b"b", "image/jpeg") == '{"a": 1}'
         models_tried = [c.kwargs["model"] for c in fake.models.generate_content.call_args_list]
         assert models_tried == ["model-1", "model-2"]
 
@@ -472,7 +476,7 @@ class TestGeminiClient:
             503, {"error": {"message": "busy", "status": "UNAVAILABLE"}})
         sdk, fake = _patched_sdk(side_effect=busy)
         with sdk, pytest.raises(AIServiceError):
-            _gemini().generate("prompt", b"b", PDF)
+            _gemini().generate("prompt", b"b", "image/jpeg")
         assert fake.models.generate_content.call_count == 2
 
     def test_network_timeout_raises_service_error(self):
