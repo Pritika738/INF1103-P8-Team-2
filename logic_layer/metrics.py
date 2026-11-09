@@ -13,7 +13,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from enums import Tier
+from .enums import Tier
 
 
 class MetricSpec(ABC):

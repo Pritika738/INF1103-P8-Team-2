@@ -14,16 +14,13 @@ Run with:
     python -m pytest tests/test_logic_manager.py
 """
 
-from metrics import (
+from logic_layer import (
     HeartRate, SystolicBloodPressure, DiastolicBloodPressure, BloodGlucose,
-)
-from enums import Tier
-from rules import (
+    Tier,
     UrgentThresholdRule, PersistentTrendRule, RecentChangeRule,
+    MedicalProfileValidator, ManualVitalsValidator,
 )
 from logic_manager import LogicManager
-from medical_profile_validator import MedicalProfileValidator
-from manual_vitals_validator import ManualVitalsValidator
 
 
 # ---------------------------------------------------------------------------

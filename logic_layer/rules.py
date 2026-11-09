@@ -13,8 +13,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
-from metrics import MetricSpec
-from findings import Finding
+from .metrics import MetricSpec
+from .findings import Finding
 
 
 class Rule(ABC):
