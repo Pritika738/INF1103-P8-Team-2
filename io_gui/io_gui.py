@@ -2933,41 +2933,100 @@ def show_vitals():
 
 
 def show_vitals_log_form(username):
-    """The entry form. Blank fields are simply not recorded, so a user
-    can log only blood pressure, only glucose, or anything in between."""
+    """Allow the user to choose which self-measured vitals to record."""
+
+    st.subheader("New reading")
+
+    selected_readings = st.multiselect(
+        "What would you like to log?",
+        options=[
+            "Blood pressure",
+            "Heart rate",
+            "Blood glucose",
+        ],
+        placeholder="Select one or more readings",
+        key="vitals_reading_types",
+    )
+
+    if not selected_readings:
+        st.caption("Select at least one reading type to continue.")
+        return
+
+    # Unselected measurements stay None and therefore are not recorded.
+    systolic = None
+    diastolic = None
+    heart_rate = None
+    glucose = None
+
     with st.form("log_vitals_form", clear_on_submit=True):
-        st.subheader("New reading")
 
         c1, c2 = st.columns(2)
+
         with c1:
             measured_date = st.date_input(
-                "Date measured", value=date.today(), max_value=date.today(),
+                "Date measured",
+                value=date.today(),
+                max_value=date.today(),
                 format="DD/MM/YYYY",
             )
+
         with c2:
-            measured_time = st.time_input("Time measured", value=datetime.now().time())
+            measured_time = st.time_input(
+                "Time measured",
+                value=datetime.now().time()
+            )
 
-        st.markdown("*Blood pressure*")
-        b1, b2 = st.columns(2)
-        with b1:
-            systolic = st.number_input("Systolic (top number, mmHg)",
-                                       min_value=0, step=1, value=None)
-        with b2:
-            diastolic = st.number_input("Diastolic (bottom number, mmHg)",
-                                        min_value=0, step=1, value=None)
+        if "Blood pressure" in selected_readings:
 
-        o1, o2 = st.columns(2)
-        with o1:
-            heart_rate = st.number_input("Heart rate (bpm)", min_value=0, step=1, value=None)
-        with o2:
-            glucose = st.number_input("Blood glucose (mmol/L)", min_value=0.0,
-                                      step=0.1, format="%.1f", value=None)
+            st.markdown("*Blood pressure*")
 
-        note = st.text_input("Notes (optional)",
-                             placeholder="e.g. after morning walk, before breakfast",
-                             max_chars=logic_manager.ManualVitalsValidator.MAX_NOTE_LENGTH)
+            b1, b2 = st.columns(2)
 
-        submitted = st.form_submit_button("Save reading", type="primary")
+            with b1:
+                systolic = st.number_input(
+                    "Systolic (top number, mmHg)",
+                    min_value=0,
+                    step=1,
+                    value=None,
+                )
+
+            with b2:
+                diastolic = st.number_input(
+                    "Diastolic (bottom number, mmHg)",
+                    min_value=0,
+                    step=1,
+                    value=None,
+                )
+
+        if "Heart rate" in selected_readings:
+
+            heart_rate = st.number_input(
+                "Heart rate (bpm)",
+                min_value=0,
+                step=1,
+                value=None,
+            )
+
+        if "Blood glucose" in selected_readings:
+
+            glucose = st.number_input(
+                "Blood glucose (mmol/L)",
+                min_value=0.0,
+                step=0.1,
+                format="%.1f",
+                value=None,
+            )
+
+        note = st.text_input(
+            "Notes (optional)",
+            placeholder="e.g. after morning walk, before breakfast",
+            max_chars=logic_manager.ManualVitalsValidator.MAX_NOTE_LENGTH,
+        )
+
+        submitted = st.form_submit_button(
+            "Save reading",
+            type="primary"
+        )
 
     if not submitted:
         return
@@ -2989,16 +3048,21 @@ def show_vitals_log_form(username):
             st.error(message)
         return
 
-    # Compare only against this user's EARLIER self-logged readings
-    # (by when they were measured) - never against medical reports.
+    # Compare only against this user's earlier self-logged readings.
     measured_at = (cleaned["date"], cleaned["time"])
+
     previous = [
         e for e in data_service.list_manual_vitals(username)
         if (e.get("date") or "", e.get("time") or "") <= measured_at
     ]
-    result = vitals_logic.process_manual_reading(cleaned["metrics"], previous)
+
+    result = vitals_logic.process_manual_reading(
+        cleaned["metrics"],
+        previous
+    )
 
     entry = dict(cleaned)
+
     entry.update({
         "username": username,
         "source": "manual",
@@ -3015,13 +3079,23 @@ def show_vitals_log_form(username):
         st.error("Could not save this reading. Please try again.")
         return
 
-    severity = DECISION_SEVERITY.get(result["decision"], "info")
+    severity = DECISION_SEVERITY.get(
+        result["decision"],
+        "info"
+    )
+
     with st.container(border=True):
-        st.markdown("*Reading saved* &nbsp; " + severity_badge(severity),
-                    unsafe_allow_html=True)
+
+        st.markdown(
+            "*Reading saved* &nbsp; " + severity_badge(severity),
+            unsafe_allow_html=True
+        )
+
         st.write(result["summary"])
+
         if result["requires_doctor_review"]:
             st.warning(result["recommended_action"])
+
         for change in result["recent_changes"]:
             st.caption(change["feedback"])
 
