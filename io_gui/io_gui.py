@@ -3338,7 +3338,6 @@ def show_vitals_log_form(username):
         ],
         placeholder="Select one or more readings",
         key="vitals_reading_types",
-        select_all=False,
     )
 
     if not selected_readings:
