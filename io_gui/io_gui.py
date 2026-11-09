@@ -1230,7 +1230,6 @@ def create_temporary_account(
     # Store HASH, not actual password
     accounts[username_key] = {
         "username": username,
-        "phone": phone,
         "salt": salt,
         "password_hash": hash_password(password, salt)
     }
