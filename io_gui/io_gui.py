@@ -2819,15 +2819,30 @@ def show_upload():
                     first_page = validated_pages[0]
 
                     with st.spinner("Sending report to the AI Manager..."):
+
                         ai_extracted = ai_service.extract_report(
-                            first_page["bytes"], first_page["mime_type"]
+                            first_page["bytes"],
+                            first_page["mime_type"]
                         )
 
+                        if ai_extracted is None:
+
+                            st.error(
+                                "AI analysis could not complete successfully. "
+                                "Please try again."
+                            )
+
+                            return
+
                         all_records = data_service.load_health_records()
-                        user_records = records_for_current_user(all_records)
+
+                        user_records = records_for_current_user(
+                            all_records
+                        )
 
                         processed_record = logic_manager.process_ai_record(
-                            ai_extracted, user_records
+                            ai_extracted,
+                            user_records
                         )
 
                     if processed_record["decision"] == "NOT_MEDICAL_REPORT":
