@@ -21,6 +21,7 @@ from enums import Tier
 from rules import (
     UrgentThresholdRule, PersistentTrendRule, RecentChangeRule,
 )
+from logic_manager import LogicManager
 
 
 # ---------------------------------------------------------------------------
@@ -183,3 +184,58 @@ def test_recent_change_improvement_is_labelled():
     finding = rule.evaluate(85, [120])  # delta -35
     assert finding is not None
     assert finding.to_dict()["assessment"] == "improved"
+
+
+# ---------------------------------------------------------------------------
+# LogicManager.process() - scoring and routing of a whole AI record.
+# risk_score = (#urgent * 2) + (#flagged). Decision follows: any urgent
+# -> URGENT; else any flagged -> FLAGGED; else ACCEPTED. Special cases:
+# not-a-medical-report and no-extractable-metrics.
+# ---------------------------------------------------------------------------
+
+def _engine():
+    return LogicManager.default()
+
+
+def test_process_routes_not_medical_report():
+    result = _engine().process({"is_medical_report": False}, [])
+    assert result["decision"] == "NOT_MEDICAL_REPORT"
+    assert result["requires_doctor_review"] is False
+
+
+def test_process_rejects_when_no_metrics_extracted():
+    ai = {"heart_rate": None,
+          "blood_pressure": {"systolic": None, "diastolic": None},
+          "blood_glucose": None}
+    result = _engine().process(ai, [])
+    assert result["decision"] == "REJECTED"
+
+
+def test_process_routes_urgent_and_scores():
+    ai = {"heart_rate": 138,
+          "blood_pressure": {"systolic": 188, "diastolic": 122},
+          "blood_glucose": 15.4,
+          "report_date": "2026-09-22"}
+    result = _engine().process(ai, [])
+    assert result["decision"] == "URGENT"
+    assert len(result["urgent_findings"]) == 4
+    # four urgent findings, no flagged -> score = 4*2 + 0
+    assert result["risk_score"] == 8
+    assert result["requires_doctor_review"] is True
+
+
+def test_process_accepts_normal_reading():
+    ai = {"heart_rate": 72,
+          "blood_pressure": {"systolic": 118, "diastolic": 76},
+          "blood_glucose": 5.2,
+          "report_date": "2026-09-22"}
+    result = _engine().process(ai, [])
+    assert result["decision"] == "ACCEPTED"
+    assert result["risk_score"] == 0
+    assert result["requires_doctor_review"] is False
+
+
+def test_process_preserves_extracted_date():
+    ai = {"heart_rate": 72, "report_date": "2026-09-22"}
+    result = _engine().process(ai, [])
+    assert result["ai_extracted_date"] == "2026-09-22"
