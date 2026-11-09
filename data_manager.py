@@ -96,6 +96,11 @@ class DataManager:
             manual_vitals if manual_vitals is not None
             else JsonRecordRepository(MANUAL_VITALS_FILE)
         )
+        self._medical_profile_pdfs = (
+            medical_profile_pdfs
+            if medical_profile_pdfs is not None
+            else MedicalProfilePdfArchive()
+        )
 
     @classmethod
     def create(cls) -> "DataManager":
@@ -107,6 +112,7 @@ class DataManager:
             MedicalProfileStore(),
             SqliteAccountRepository(),
             JsonRecordRepository(MANUAL_VITALS_FILE),
+            MedicalProfilePdfArchive(),
         )
 
         # ------------------------------------------------------------------
