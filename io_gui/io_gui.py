@@ -3845,12 +3845,63 @@ def build_pdf(who, report):
                 para("- " + t["metric"] + ": " + str(t["latest"])
                      + " " + t["unit"] + " (" + t["note"] + ")")
             pdf.ln(2)
+        if report.get("manual_vital_trends"):
+
+            section(
+                "My Vitals - Self-logged readings"
+            )
+
+            para(
+                "These readings were entered by the user "
+                "and are shown separately from measurements "
+                "extracted from medical reports."
+            )
+
+            pdf.ln(1)
+
+            for t in report[
+                "manual_vital_trends"
+            ]:
+
+                para(
+                    "- "
+                    + t["metric"]
+                    + ": "
+                    + str(t["latest"])
+                    + " "
+                    + t["unit"]
+                    + " ("
+                    + t["note"]
+                    + ")"
+                )
+
+            latest_manual = report.get(
+                "latest_manual_vital"
+            )
+
+            if (
+                latest_manual
+                and latest_manual.get(
+                    "requires_doctor_review"
+                )
+            ):
+
+                pdf.ln(1)
+
+                para(
+                    "Attention: "
+                    + latest_manual.get(
+                        "recommended_action",
+                        ""
+                    )
+                )
+
+            pdf.ln(2)
         if report["notes"]:
             section("Note")
             for n in report["notes"]:
                 para("- " + n)
             pdf.ln(2)
-
         out = pdf.output()
         if isinstance(out, (bytes, bytearray)):
             return bytes(out), None
