@@ -1761,7 +1761,6 @@ def show_register():
                     created, message = (
                         create_temporary_account(
                             username,
-                            phone,
                             password
                         )
                     )
