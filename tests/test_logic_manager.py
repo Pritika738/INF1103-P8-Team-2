@@ -18,6 +18,9 @@ from metrics import (
     HeartRate, SystolicBloodPressure, DiastolicBloodPressure, BloodGlucose,
 )
 from enums import Tier
+from rules import (
+    UrgentThresholdRule, PersistentTrendRule, RecentChangeRule,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -73,3 +76,68 @@ def test_is_urgent_matches_severe_threshold():
     assert spec.is_urgent(130) is True
     assert spec.is_urgent(129) is False
     assert spec.is_urgent(None) is False
+
+
+# ---------------------------------------------------------------------------
+# UrgentThresholdRule - fires on a single reading at/above urgent_at,
+# regardless of history.
+# ---------------------------------------------------------------------------
+
+def test_urgent_rule_fires_at_threshold():
+    rule = UrgentThresholdRule(HeartRate())  # urgent_at = 130
+    finding = rule.evaluate(130, [])
+    assert finding is not None
+    assert finding.status == "URGENT"
+
+
+def test_urgent_rule_silent_below_threshold():
+    rule = UrgentThresholdRule(HeartRate())
+    assert rule.evaluate(129, []) is None
+
+
+def test_urgent_rule_ignores_history():
+    # A single urgent reading fires even with no prior visits.
+    rule = UrgentThresholdRule(BloodGlucose())  # urgent_at = 13.9
+    assert rule.evaluate(14.0, []) is not None
+
+
+def test_urgent_rule_none_value_is_silent():
+    rule = UrgentThresholdRule(HeartRate())
+    assert rule.evaluate(None, [120, 125]) is None
+
+
+# ---------------------------------------------------------------------------
+# PersistentTrendRule - the MULTI-CONDITION rule the brief requires
+# preserved. Fires FLAGGED only when BOTH hold:
+#   (a) flag_above < current < urgent_at, AND
+#   (b) current > previous > the-one-before (strictly rising x3).
+# ---------------------------------------------------------------------------
+
+def test_persistent_trend_fires_on_three_strictly_rising():
+    rule = PersistentTrendRule(SystolicBloodPressure())  # flag=130, urgent=180
+    finding = rule.evaluate(150, [135, 142])  # 142 < 150, 135 < 142 -> rising
+    assert finding is not None
+    assert finding.status == "FLAGGED"
+
+
+def test_persistent_trend_silent_when_not_strictly_rising():
+    rule = PersistentTrendRule(SystolicBloodPressure())
+    # current(150) > past_1(142) but past_1(142) is NOT > past_2(145)
+    assert rule.evaluate(150, [145, 142]) is None
+
+
+def test_persistent_trend_silent_when_current_not_elevated():
+    rule = PersistentTrendRule(SystolicBloodPressure())
+    # current 128 is below flag_above(130): condition (a) fails
+    assert rule.evaluate(128, [120, 124]) is None
+
+
+def test_persistent_trend_defers_to_urgent():
+    rule = PersistentTrendRule(SystolicBloodPressure())
+    # current 185 is urgent -> handled by UrgentThresholdRule, not here
+    assert rule.evaluate(185, [150, 170]) is None
+
+
+def test_persistent_trend_needs_two_history_points():
+    rule = PersistentTrendRule(SystolicBloodPressure())
+    assert rule.evaluate(150, [142]) is None  # only one prior reading
