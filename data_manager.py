@@ -53,6 +53,19 @@ from data_layer import (
     default_medical_profile,
 )
 
+from data_layer import (
+    AccountRepository,
+    ConsultationPdfArchive,
+    JsonRecordRepository,
+    MedicalProfilePdfArchive,
+    MedicalProfileStore,
+    OriginalReportArchive,
+    RecordRepository,
+    SqliteAccountRepository,
+    SqliteRecordRepository,
+    default_medical_profile,
+)
+
 __all__ = [
     "DataManager", "RecordRepository", "JsonRecordRepository", "SqliteRecordRepository",
     "ConsultationPdfArchive", "OriginalReportArchive", "MedicalProfileStore",
@@ -68,7 +81,8 @@ class DataManager:
                  original_reports: OriginalReportArchive,
                  medical_profiles: MedicalProfileStore,
                  accounts: AccountRepository,
-                 manual_vitals: Optional[RecordRepository] = None):
+                 manual_vitals: Optional[RecordRepository] = None,
+                 medical_profile_pdfs: Optional[MedicalProfilePdfArchive] = None):
         self._records = records                      # aggregation: all injected
         self._consultation_pdfs = consultation_pdfs
         self._original_reports = original_reports
