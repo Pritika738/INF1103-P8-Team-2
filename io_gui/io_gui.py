@@ -3693,6 +3693,74 @@ def show_consultation():
                     "<div>" + severity_badge(t["severity"]) + "</div></div>",
                     unsafe_allow_html=True,
                 )
+                
+        if report.get("manual_vital_trends"):
+
+            st.divider()
+
+            st.markdown(
+                "##### My Vitals — Self-logged readings"
+            )
+
+            st.caption(
+                "These readings were entered by you and are shown "
+                "separately from measurements extracted from medical reports."
+            )
+
+            for t in report["manual_vital_trends"]:
+
+                with st.container(border=True):
+
+                    left, right = st.columns([3, 1])
+
+                    with left:
+
+                        st.markdown(
+                            f"**{t['metric']}**"
+                        )
+
+                        st.caption(
+                            t["note"]
+                        )
+
+                    with right:
+
+                        st.markdown(
+                            "<div style='text-align:right;"
+                            "font-size:1.25rem;"
+                            "font-weight:800;"
+                            "color:var(--text-strong);'>"
+                            + str(t["latest"])
+                            + " "
+                            + t["unit"]
+                            + "</div>",
+                            unsafe_allow_html=True,
+                        )
+
+                        st.markdown(
+                            severity_badge(
+                                t["severity"]
+                            ),
+                            unsafe_allow_html=True,
+                        )
+
+            latest_manual = report.get(
+                "latest_manual_vital"
+            )
+
+            if (
+                latest_manual
+                and latest_manual.get(
+                    "requires_doctor_review"
+                )
+            ):
+
+                st.warning(
+                    latest_manual.get(
+                        "recommended_action",
+                        ""
+                    )
+                )
 
         if report["notes"]:
             st.markdown("##### Note")
