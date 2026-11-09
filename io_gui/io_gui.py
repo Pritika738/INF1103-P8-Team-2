@@ -2313,6 +2313,80 @@ def show_profile():
                     )
         else:
             st.error("Could not save your profile. Please try again.")
+        
+    st.divider()
+
+    st.subheader("Medical Profile History")
+
+    st.caption(
+        "Previous versions of your saved medical profile."
+    )
+
+    profile_pdfs = (
+        data_service.list_medical_profile_pdfs(
+            username
+        )
+    )
+
+    if not profile_pdfs:
+
+        st.caption(
+            "Saved medical profile PDFs will appear here."
+        )
+
+    else:
+
+        for entry in profile_pdfs:
+
+            with st.container(border=True):
+
+                generated = _format_summary_timestamp(
+                    entry.get("generated_at")
+                )
+
+                cols = st.columns(
+                    [3, 2, 1]
+                )
+
+                with cols[0]:
+
+                    st.markdown(
+                        f"**{entry['filename']}**"
+                    )
+
+                with cols[1]:
+
+                    st.caption(
+                        f"Saved {generated}"
+                    )
+
+                with cols[2]:
+
+                    pdf_data = (
+                        data_service
+                        .get_medical_profile_pdf_bytes(
+                            entry["filename"]
+                        )
+                    )
+
+                    if pdf_data:
+
+                        st.download_button(
+                            "Download",
+                            data=pdf_data,
+                            file_name=entry["filename"],
+                            mime="application/pdf",
+                            key=(
+                                "medical_profile_"
+                                + entry["filename"]
+                            ),
+                        )
+
+                    else:
+
+                        st.caption(
+                            "File unavailable"
+                        )
 
 def show_settings():
     hero("Settings", "Manage how you sign in to PASSAY.")
