@@ -312,51 +312,59 @@ class LogicManager:
         """
         # Deterministic acceptance rule: AI already classified the doc.
         if isinstance(ai_extracted, dict) and ai_extracted.get("is_medical_report") is False:
-            reason = ai_extracted.get("classification_reason") or (
-                "The uploaded file does not appear to be a medical report."
-            )
-            return {
-                "metrics": self._flatten_ai_metrics(None),
-                "ai_extracted_date": None,
-                "urgent_findings": [],
-                "flagged_trends": [],
-                "recent_changes": [],
-                "risk_score": 0,
-                "decision": Decision.NOT_MEDICAL_REPORT.value,
-                "recommended_action": (
-                    "The uploaded file does not appear to be a medical "
-                    "report. Please upload a valid medical report "
-                    "containing health-related examination or test "
-                    "information."
-                ),
-                "requires_doctor_review": False,
-                "summary": reason,
-            }
+            return self._not_medical_result(ai_extracted.get("classification_reason"))
 
         current_metrics = self._flatten_ai_metrics(ai_extracted)
         ai_extracted_date = self._extract_report_date(ai_extracted)
 
         if all(value is None for value in current_metrics.values()):
-            return {
-                "metrics": current_metrics,
-                "ai_extracted_date": ai_extracted_date,
-                "urgent_findings": [],
-                "flagged_trends": [],
-                "recent_changes": [],
-                "risk_score": 0,
-                "decision": Decision.REJECTED.value,
-                "recommended_action": (
-                    "No reliable measurements could be extracted from this "
-                    "report. Please try uploading a clearer copy."
-                ),
-                "requires_doctor_review": False,
-                "summary": (
-                    "No usable measurements were extracted from this report."
-                ),
-            }
+            return self._rejected_result(current_metrics, ai_extracted_date)
 
         findings = self.evaluate(current_metrics, historical_records)
         return self._finalise(current_metrics, ai_extracted_date, findings)
+
+    def _not_medical_result(self, reason: Optional[str]) -> Dict[str, Any]:
+        """Result for a file the AI classified as not a medical report."""
+        return {
+            "metrics": self._flatten_ai_metrics(None),
+            "ai_extracted_date": None,
+            "urgent_findings": [],
+            "flagged_trends": [],
+            "recent_changes": [],
+            "risk_score": 0,
+            "decision": Decision.NOT_MEDICAL_REPORT.value,
+            "recommended_action": (
+                "The uploaded file does not appear to be a medical "
+                "report. Please upload a valid medical report "
+                "containing health-related examination or test "
+                "information."
+            ), "requires_doctor_review": False,
+            "summary": reason or (
+                "The uploaded file does not appear to be a medical report."
+            ),
+        }
+
+    @staticmethod
+    def _rejected_result(current_metrics: Dict[str, Optional[float]],
+                         ai_extracted_date: Optional[str]) -> Dict[str, Any]:
+        """Result for a medical report with no usable measurements."""
+        return {
+            "metrics": current_metrics,
+            "ai_extracted_date": ai_extracted_date,
+            "urgent_findings": [],
+            "flagged_trends": [],
+            "recent_changes": [],
+            "risk_score": 0,
+            "decision": Decision.REJECTED.value,
+            "recommended_action": (
+                "No reliable measurements could be extracted from this "
+                "report. Please try uploading a clearer copy."
+            ),
+            "requires_doctor_review": False,
+            "summary": (
+                "No usable measurements were extracted from this report."
+            ),
+        }
 
     def _finalise(self, current_metrics: Dict[str, Optional[float]],
                   ai_extracted_date: Optional[str],
