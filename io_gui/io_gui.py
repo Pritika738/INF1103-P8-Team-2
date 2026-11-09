@@ -3285,9 +3285,10 @@ def show_vitals():
         "Log readings you measure yourself - e.g. your daily blood pressure.",
     )
     st.caption(
-        "Self-logged readings are kept separately from your medical reports. "
-        "They do not appear in Health History, Health Trends or the "
-        "Consultation summary, which only use uploaded reports."
+    "Self-logged readings are kept separately from your medical reports. "
+    "They do not appear in Health History or Health Trends. "
+    "Relevant self-logged trends and changes are shown separately "
+    "in your Consultation Report."
     )
 
     username = current_user()
