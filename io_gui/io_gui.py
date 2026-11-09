@@ -3641,8 +3641,21 @@ def show_consultation():
     # "this exact summary is already saved" (see
     # data_manager.find_consultation_pdf_by_source()) instead of saving
     # a duplicate on every Streamlit rerun.
+    report_record_id = (
+        latest_processed_record.get("record_id")
+        if latest_processed_record
+        else None
+    )
+
+    vital_record_id = (
+        latest_manual_vital.get("record_id")
+        if latest_manual_vital
+        else None
+    )
+
     source_record_id = (
-        latest_processed_record.get("record_id") if latest_processed_record else None
+        f"report:{report_record_id or 'none'}"
+        f"|vital:{vital_record_id or 'none'}"
     )
 
     ai_narrative = None
