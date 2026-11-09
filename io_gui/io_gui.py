@@ -1872,6 +1872,268 @@ def show_dashboard():
             unsafe_allow_html=True,
         )
 
+def build_medical_profile_pdf(who, profile):
+
+    try:
+        from fpdf import FPDF
+    except Exception:
+        return None, "PDF library is not installed."
+
+    def safe(text):
+        return str(text).encode(
+            "latin-1",
+            "replace"
+        ).decode("latin-1")
+
+    try:
+
+        pdf = FPDF()
+        pdf.add_page()
+
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.cell(
+            0,
+            10,
+            safe("PASSAY Medical Profile"),
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
+
+        pdf.set_font("Helvetica", "", 10)
+
+        pdf.cell(
+            0,
+            7,
+            safe(f"Patient: {who}"),
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
+
+        pdf.cell(
+            0,
+            7,
+            safe(
+                "Generated: "
+                + datetime.now().strftime("%d %B %Y, %H:%M")
+            ),
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
+
+        pdf.ln(5)
+
+        def section(title):
+
+            pdf.set_font("Helvetica", "B", 12)
+            pdf.cell(
+                0,
+                8,
+                safe(title),
+                new_x="LMARGIN",
+                new_y="NEXT",
+            )
+
+            pdf.set_font("Helvetica", "", 10)
+
+        def line(text):
+
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(
+                0,
+                6,
+                safe(text)
+            )
+
+        # Blood group
+        section("Blood Group")
+
+        line(
+            profile.get("blood_group")
+            or "Not recorded"
+        )
+
+        pdf.ln(2)
+
+        # Medications
+        section("Current Medications")
+
+        medications = profile.get(
+            "medications",
+            []
+        )
+
+        if medications:
+
+            for medication in medications:
+
+                dosage = ""
+
+                if medication.get("dosage_amount") is not None:
+
+                    dosage = str(
+                        medication.get("dosage_amount")
+                    )
+
+                    if medication.get("dosage_unit"):
+                        dosage += " " + medication["dosage_unit"]
+
+                text = "- " + medication.get(
+                    "name",
+                    ""
+                )
+
+                if dosage:
+                    text += ": " + dosage
+
+                if medication.get("frequency"):
+                    text += ", " + medication["frequency"]
+
+                line(text)
+
+        else:
+
+            line("None recorded")
+
+        pdf.ln(2)
+
+        # Allergies
+        section("Allergies")
+
+        allergies = profile.get(
+            "allergies",
+            []
+        )
+
+        if allergies:
+
+            for allergy in allergies:
+
+                text = "- " + allergy.get(
+                    "allergen",
+                    ""
+                )
+
+                if allergy.get("reaction"):
+                    text += " - Reaction: " + allergy["reaction"]
+
+                if allergy.get("severity"):
+                    text += " - Severity: " + allergy["severity"]
+
+                line(text)
+
+        else:
+
+            line("None recorded")
+
+        pdf.ln(2)
+
+        # Emergency contacts
+        section("Emergency Contacts")
+
+        contacts = profile.get(
+            "emergency_contacts",
+            []
+        )
+
+        if contacts:
+
+            for contact in contacts:
+
+                text = "- " + contact.get(
+                    "name",
+                    ""
+                )
+
+                if contact.get("relationship"):
+                    text += " (" + contact["relationship"] + ")"
+
+                if contact.get("phone"):
+                    text += " - " + contact["phone"]
+
+                if contact.get("email"):
+                    text += " - " + contact["email"]
+
+                line(text)
+
+        else:
+
+            line("None recorded")
+
+        pdf.ln(2)
+
+        # Hereditary illness
+        section("Hereditary Illness")
+
+        hereditary = profile.get(
+            "hereditary_illness",
+            {}
+        )
+
+        conditions = []
+
+        if hereditary.get("diabetes"):
+            conditions.append("Diabetes")
+
+        if hereditary.get("blood_pressure"):
+            conditions.append("Blood pressure")
+
+        if hereditary.get("heart_disease"):
+            conditions.append("Heart disease")
+
+        if hereditary.get("asthma"):
+            conditions.append("Asthma")
+
+        if hereditary.get("other"):
+            conditions.append(
+                hereditary["other"]
+            )
+
+        if conditions:
+
+            for condition in conditions:
+                line("- " + condition)
+
+        else:
+
+            line("None recorded")
+
+        if hereditary.get("notes"):
+
+            pdf.ln(1)
+
+            line(
+                "Notes: "
+                + hereditary["notes"]
+            )
+
+        pdf.ln(5)
+
+        pdf.set_font(
+            "Helvetica",
+            "I",
+            8
+        )
+
+        line(
+            "This document contains information entered by the "
+            "user and is intended to help communicate medical "
+            "history to healthcare professionals."
+        )
+
+        output = pdf.output()
+
+        if isinstance(
+            output,
+            (bytes, bytearray)
+        ):
+            return bytes(output), None
+
+        return output.encode("latin-1"), None
+
+    except Exception as exc:
+
+        return None, str(exc)
+
 def show_profile():
     hero("Medical Profile", "Your standing health information, ready for any appointment.")
 
