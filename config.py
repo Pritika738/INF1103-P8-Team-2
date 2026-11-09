@@ -71,8 +71,13 @@ MAX_RETAINED_SUMMARY_PDFS = None
 # Name of the Gemini model to use. "gemini-flash-latest" is an alias that
 # Google always points at their current Flash model, so we don't have to
 # update this string every time a newer Flash version is released.
-AI_MODEL_NAME = "gemini-3-flash-preview"
-AI_FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.1-pro-preview"]
+AI_MODEL_NAME = "gemini-3.8-flash"
+
+AI_FALLBACK_MODELS = [
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+]
 # The actual key value must never be committed to source control.
 API_KEY_ENV_VAR = "GEMINI_API_KEY"
 
