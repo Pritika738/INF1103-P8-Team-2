@@ -9,13 +9,17 @@ Run with:
     python -m pytest tests/test_user_file_integration.py
 """
 
+import json
+
 import pytest
 
+from ai_manager import AIManager, MockAIClient
 from data_layer import (
     ConsultationPdfArchive, JsonAccountRepository, JsonListStore,
     JsonRecordRepository, MedicalProfileStore, OriginalReportArchive,
 )
 from data_manager import DataManager
+from file import ExtractedFile
 from user import User
 
 
@@ -78,3 +82,58 @@ def test_account_methods_reject_non_users(dm):
         dm.get_account("alice")
     with pytest.raises(TypeError):
         dm.save_account("alice", {})
+
+
+# ---------------------------------------------------------------------------
+# AIManager -> ExtractedFile
+# ---------------------------------------------------------------------------
+
+def extraction_json(heart_rate=72, blood_glucose=5.0, report_date="2026-01-01",
+                    is_medical_report=True):
+    """The JSON string the AI returns for one report."""
+    return json.dumps({
+        "is_medical_report": is_medical_report,
+        "classification_reason": "Lab report.",
+        "heart_rate": heart_rate,
+        "blood_pressure": {"systolic": 118, "diastolic": 76},
+        "blood_glucose": blood_glucose,
+        "report_date": report_date,
+    })
+
+
+ALL_SUPPORTED = json.dumps({
+    "heart_rate_supported": True,
+    "blood_pressure_supported": True,
+    "blood_glucose_supported": True,
+    "report_date_supported": True,
+})
+
+
+def ai_with(*replies):
+    """An AIManager whose mock client returns these replies in order."""
+    return AIManager(MockAIClient(list(replies)))
+
+
+def test_extract_file_returns_validated_extracted_file():
+    f = ai_with(extraction_json(), ALL_SUPPORTED).extract_file(b"pdf", "application/pdf", "lab.pdf")
+    assert isinstance(f, ExtractedFile)
+    assert f.source == "lab.pdf"
+    assert f.mime_type == "application/pdf"
+    assert f.report_date == "2026-01-01"
+    assert f.metrics["blood_pressure_systolic"] == 118
+
+
+def test_extract_file_keeps_non_medical_classification():
+    f = ai_with(extraction_json(is_medical_report=False)).extract_file(b"img", "image/png", "cat.png")
+    assert isinstance(f, ExtractedFile)
+    assert f.is_medical_report is False
+
+
+def test_extract_file_rejects_invalid_ai_values():
+    # The AI schema allows any number; ExtractedFile refuses a negative reading.
+    ai = ai_with(extraction_json(heart_rate=-5), ALL_SUPPORTED)
+    assert ai.extract_file(b"pdf", "application/pdf", "lab.pdf") is None
+
+
+def test_extract_file_returns_none_when_ai_fails():
+    assert AIManager(MockAIClient([])).extract_file(b"pdf", "application/pdf", "lab.pdf") is None
