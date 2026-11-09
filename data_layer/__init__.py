@@ -12,6 +12,10 @@ from .original_report_archive import OriginalReportArchive, original_reports_tab
 from .sqlite_list_store import SqliteListStore
 from .repositories import JsonRecordRepository, RecordRepository
 from .sqlite_repository import SqliteRecordRepository
+from .medical_profile_archive import (
+    MedicalProfilePdfArchive,
+    medical_profile_pdfs_table,
+)
 
 __all__ = [
     "JsonStore", "JsonListStore", "JsonObjectStore",
@@ -20,4 +24,5 @@ __all__ = [
     "ConsultationPdfArchive", "OriginalReportArchive",
     "consultation_summaries_table", "original_reports_table", "SqliteListStore",
     "MedicalProfileStore", "default_medical_profile",
+    "MedicalProfilePdfArchive", "medical_profile_pdfs_table",
 ]

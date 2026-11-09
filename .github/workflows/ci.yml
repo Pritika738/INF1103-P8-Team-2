@@ -1,0 +1,19 @@
+name: PASSAY CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t passay .
+
+      - name: Run automated tests inside Docker
+        run: docker run --rm passay python -m pytest -q

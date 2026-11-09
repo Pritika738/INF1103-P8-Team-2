@@ -158,6 +158,16 @@ class ExtractedFile:
             "metrics": self.metrics,
         }
 
+    def __eq__(self, other: object) -> bool:
+        """Two ExtractedFile objects are equal if they come from the same source file."""
+        if not isinstance(other, ExtractedFile):
+            return NotImplemented
+        return self.__source == other.source
+
+    def __hash__(self) -> int:
+        """Hash by source, so equal files land in the same set/dict slot."""
+        return hash(self.__source)
+    
     def __repr__(self) -> str:
         return (f"ExtractedFile(source={self.__source!r}, date={self.__report_date!r}, "
                 f"medical={self.__is_medical_report})")
