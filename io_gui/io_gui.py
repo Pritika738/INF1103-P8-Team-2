@@ -1585,7 +1585,127 @@ def show_login():
 
                 go("pin_login")
 
+def show_pin_login():
 
+    left, mid, right = st.columns([1, 1.4, 1])
+
+    with mid:
+
+        st.markdown(
+            "<div class='vt-hero' style='text-align:center;margin-top:2.5rem;'>"
+            "<div class='vt-bob' style='font-size:3.8rem;'>🔑</div>"
+            "<h1 style='margin:0;font-size:2.3rem;"
+            "background:linear-gradient(90deg,#a78bfa,#5eead4);"
+            "-webkit-background-clip:text;"
+            "-webkit-text-fill-color:transparent;'>"
+            "Quick Login with PIN"
+            "</h1>"
+            "<p style='color:var(--text-muted);'>"
+            "Enter your username and 4-digit PIN for faster sign-in."
+            "</p>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        with st.container(border=True):
+
+            attempts = st.session_state.get("pin_attempts", 0)
+
+            if attempts >= PIN_MAX_ATTEMPTS:
+
+                st.error(
+                    "Too many incorrect PIN attempts. Please sign in "
+                    "with your password instead."
+                )
+
+            else:
+
+                pin_username = st.text_input(
+                    "Username",
+                    key="pin_login_username",
+                )
+
+                pin_value = st.text_input(
+                    "4-digit PIN",
+                    type="password",
+                    max_chars=4,
+                    key="pin_login_pin",
+                )
+
+                if st.button(
+                    "Log In with PIN",
+                    type="primary",
+                    width="stretch",
+                ):
+
+                    pin_error = validate_pin(pin_value)
+
+                    if not pin_username.strip():
+
+                        st.error("Please enter your username.")
+
+                    elif pin_error:
+
+                        st.error(pin_error)
+
+                    elif authenticate_with_pin(
+                        pin_username,
+                        pin_value
+                    ):
+
+                        accounts = load_accounts()
+
+                        account = accounts[
+                            pin_username.strip().lower()
+                        ]
+
+                        st.session_state.username = account["username"]
+
+                        st.session_state.pop(
+                            "pin_attempts",
+                            None
+                        )
+
+                        go("dashboard")
+
+                    else:
+
+                        st.session_state["pin_attempts"] = (
+                            attempts + 1
+                        )
+
+                        remaining = (
+                            PIN_MAX_ATTEMPTS
+                            - st.session_state["pin_attempts"]
+                        )
+
+                        if remaining > 0:
+
+                            st.error(
+                                "Incorrect username or PIN. "
+                                f"{remaining} attempt(s) remaining."
+                            )
+
+                        else:
+
+                            st.error(
+                                "Too many incorrect PIN attempts. "
+                                "Please sign in with your password instead."
+                            )
+
+            st.write("")
+
+            if st.button(
+                "Back to Login",
+                width="stretch"
+            ):
+
+                st.session_state.pop(
+                    "pin_attempts",
+                    None
+                )
+
+                go("login")
 
 def show_register():
 
