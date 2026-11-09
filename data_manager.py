@@ -331,3 +331,34 @@ class DataManager:
     def save_medical_profile(self, username: str, profile: Dict[str, Any]) -> bool:
         """Replace one user's medical profile. Returns True on success."""
         return self._medical_profiles.save(username, profile)
+
+    def save_medical_profile_pdf(
+    self,
+    pdf_bytes: bytes,
+    username: str
+    ) -> Optional[dict]:
+
+        return self._medical_profile_pdfs.save(
+            pdf_bytes,
+            username
+        )
+
+
+    def list_medical_profile_pdfs(
+        self,
+        username: str
+    ) -> List[dict]:
+
+        return self._medical_profile_pdfs.list_for_user(
+            username
+        )
+
+
+    def get_medical_profile_pdf_bytes(
+        self,
+        filename: str
+    ) -> Optional[bytes]:
+
+        return self._medical_profile_pdfs.read_pdf_bytes(
+            filename
+        )
