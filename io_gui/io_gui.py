@@ -1186,26 +1186,6 @@ def hash_password(
 
     return hashed_password.hex()
 
-def load_accounts() -> dict:
-    """
-    Load registered accounts (keyed by lowercased username) through the
-    Data Manager - they live in the "users" table of the app database.
-    """
-
-    return data_service.load_accounts()
-
-
-def save_accounts(accounts: dict) -> None:
-    """
-    Save registered accounts permanently through the Data Manager.
-
-    Raises OSError if the save failed, so callers that already handle a
-    failed write (set_user_pin / remove_user_pin) keep working unchanged.
-    """
-
-    if not data_service.save_accounts(accounts):
-        raise OSError("Could not save accounts to the database.")
-
 def create_temporary_account(
     username: str,
     password: str
