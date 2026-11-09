@@ -56,37 +56,58 @@ class AIManager:
     # ------------------------------------------------------------------
 
     def extract_report(self, file_bytes: bytes, mime_type: str) -> Optional[dict]:
-        """Extract measurements from a report file, fully validated and verified.
+        """Extract measurements from a report file, fully validated and verified."""
 
-        Each attempt must pass: parse -> schema validation -> source
-        verification. A failing attempt is retried, with two exceptions:
-
-        - A confident "not a medical report" classification is returned
-          at once (it is a deterministic answer; every measurement is
-          null so there is nothing to verify).
-        - If every measurement is confirmed but only report_date could
-          not be, the result is accepted with report_date set to None.
-
-        Returns:
-            A validated dict, or None if every attempt failed.
-        """
         for _ in self._retry.attempts():
-            parsed = self._extraction.run(self._client, file_bytes, mime_type)
+
+            parsed = self._extraction.run(
+                self._client,
+                file_bytes,
+                mime_type
+            )
+
             if parsed is None:
                 continue
 
             if parsed["is_medical_report"] is False:
                 return parsed
 
-            results = self._check_source_verification(file_bytes, mime_type, parsed)
+            results = self._check_source_verification(
+                file_bytes,
+                mime_type,
+                parsed
+            )
+
             if results is None:
                 continue
-            if all(results.values()):
-                return parsed
 
-            date_key = VerificationTask.VERIFICATION_KEYS["report_date"]
-            if all(ok for key, ok in results.items() if key != date_key):
-                return {**parsed, "report_date": None}
+            verified = dict(parsed)
+
+            if (
+                "heart_rate_supported" in results
+                and not results["heart_rate_supported"]
+            ):
+                verified["heart_rate"] = None
+
+            if (
+                "blood_pressure_supported" in results
+                and not results["blood_pressure_supported"]
+            ):
+                verified["blood_pressure"] = None
+
+            if (
+                "blood_glucose_supported" in results
+                and not results["blood_glucose_supported"]
+            ):
+                verified["blood_glucose"] = None
+
+            if (
+                "report_date_supported" in results
+                and not results["report_date_supported"]
+            ):
+                verified["report_date"] = None
+
+            return verified
 
         return None
 
@@ -111,19 +132,50 @@ class AIManager:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _check_source_verification(self, file_bytes, mime_type, parsed) -> Optional[dict]:
-        """One verification call. Returns {key: bool} per non-null field, {} if
-        nothing was extracted, or None if the call failed / was unusable."""
-        keys_to_check = [
-            key for field, key in VerificationTask.VERIFICATION_KEYS.items()
-            if parsed.get(field) is not None
-        ]
+    def _check_source_verification(
+        self,
+        file_bytes,
+        mime_type,
+        parsed
+    ) -> Optional[dict]:
+        """Verify only measurements that were actually extracted."""
+
+        keys_to_check = []
+
+        for field, key in VerificationTask.VERIFICATION_KEYS.items():
+
+            value = parsed.get(field)
+
+            if field == "blood_pressure":
+
+                # Do not verify blood pressure if both readings are missing.
+                if (
+                    isinstance(value, dict)
+                    and (
+                        value.get("systolic") is not None
+                        or value.get("diastolic") is not None
+                    )
+                ):
+                    keys_to_check.append(key)
+
+            elif value is not None:
+
+                keys_to_check.append(key)
+
         if not keys_to_check:
             return {}
 
         reply = self._verification.run(
-            self._client, file_bytes, mime_type, extracted=parsed
+            self._client,
+            file_bytes,
+            mime_type,
+            extracted=parsed
         )
+
         if reply is None:
             return None
-        return {key: reply.get(key) is True for key in keys_to_check}
+
+        return {
+            key: reply.get(key) is True
+            for key in keys_to_check
+        }

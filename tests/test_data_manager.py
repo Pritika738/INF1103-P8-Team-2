@@ -469,3 +469,69 @@ class TestMedicalProfiles:
         dm.save_medical_profile("ann", {"blood_group": "O+"})
         with open(paths["profiles"], encoding="utf-8") as f:
             assert list(json.load(f)) == ["ann"]
+
+
+# ---------------------------------------------------------
+# Phase 2: New feature tests
+# ---------------------------------------------------------
+
+def test_manual_vitals_save_and_retrieve(dm, tmp_path):
+    from data_layer import JsonRecordRepository
+
+    dm._manual_vitals = JsonRecordRepository(
+        str(tmp_path / "manual_vitals.json")
+    )
+
+    entry = {
+        "username": "alice",
+        "date": "2026-11-09",
+        "time": "10:30",
+        "metrics": {"heart_rate": 72}
+    }
+
+    saved = dm.save_manual_vital(entry)
+
+    assert saved is not None
+    assert saved["record_id"]
+    assert len(dm.list_manual_vitals("alice")) == 1
+    assert dm.list_manual_vitals("alice")[0]["metrics"]["heart_rate"] == 72
+    assert dm.list_manual_vitals("bob") == []
+
+
+def test_manual_vitals_logic_processing():
+    from logic_manager import LogicManager
+
+    manager = LogicManager.default()
+
+    result = manager.process_manual_reading(
+        {"heart_rate": 72},
+        []
+    )
+
+    assert isinstance(result, dict)
+    assert result["decision"] == "ACCEPTED"
+
+
+def test_medical_profile_pdf_save_and_retrieve(dm, tmp_path):
+    from data_layer import MedicalProfilePdfArchive, JsonListStore
+
+    dm._medical_profile_pdfs = MedicalProfilePdfArchive(
+        str(tmp_path / "profile_pdfs"),
+        JsonListStore(str(tmp_path / "profile_pdf_metadata.json"))
+    )
+
+    pdf_bytes = b"%PDF-1.4\nTest PDF content"
+
+    saved = dm.save_medical_profile_pdf(pdf_bytes, "alice")
+
+    assert saved is not None
+    assert saved["filename"].endswith(".pdf")
+
+    history = dm.list_medical_profile_pdfs("alice")
+    assert len(history) == 1
+    assert dm.list_medical_profile_pdfs("bob") == []
+
+    retrieved = dm.get_medical_profile_pdf_bytes(
+        saved["filename"]
+    )
+    assert retrieved == pdf_bytes

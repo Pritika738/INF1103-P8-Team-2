@@ -1,26 +1,20 @@
-import re
-from typing import Dict, List, Optional
+from typing import Dict, List
 from file import ExtractedFile
-
-_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class User:
     """A user, identified by a unique username."""
 
-    def __init__(self, username: str, email: Optional[str] = None):
+    def __init__(self, username: str):
         username = (username or "").strip()
         if not username:
             raise ValueError("username must not be empty.")
-        if email is not None and not _EMAIL_PATTERN.match(email):
-            raise ValueError("email is not a valid address.")
 
         self.__username = username            # identity: read-only
-        self.__email = email
         self.__files: List[ExtractedFile] = []  # aggregation
 
     # ------------------------------------------------------------------
-    # Read-only identity, editable email
+    # Read-only identity
     # ------------------------------------------------------------------
 
     @property
@@ -28,14 +22,9 @@ class User:
         return self.__username
 
     @property
-    def email(self) -> Optional[str]:
-        return self.__email
-
-    @email.setter
-    def email(self, value: Optional[str]) -> None:
-        if value is not None and not _EMAIL_PATTERN.match(value):
-            raise ValueError("email is not a valid address.")
-        self.__email = value
+    def key(self) -> str:
+        """Lowercase username, matching how accounts are keyed in users.json."""
+        return self.__username.lower()
 
     # ------------------------------------------------------------------
     # Files belonging to this user
@@ -46,31 +35,55 @@ class User:
         """A copy, so callers cannot modify the internal list directly."""
         return list(self.__files)
 
+    @property
+    def file_count(self) -> int:
+        """How many files this user has."""
+        return len(self.__files)
+
     def add_file(self, extracted_file: ExtractedFile) -> None:
+        """Attach a file to this user. Rejects non-files and duplicates."""
+        if not isinstance(extracted_file, ExtractedFile):
+            raise TypeError("add_file expects an ExtractedFile object.")
+        if extracted_file in self.__files:
+            raise ValueError(f"{extracted_file.source!r} has already been added.")
         self.__files.append(extracted_file)
+
+    def remove_file(self, source: str) -> ExtractedFile:
+        """Detach the file with this source and return it."""
+        for index, extracted_file in enumerate(self.__files):
+            if extracted_file.source == source:
+                return self.__files.pop(index)
+        raise ValueError(f"No file with source {source!r}.")
 
     def files_by_date(self) -> List[ExtractedFile]:
         """Files with a known report date, oldest first."""
         dated = [f for f in self.__files if f.report_date]
         return sorted(dated, key=lambda f: f.report_date)
 
+    def medical_files(self) -> List[ExtractedFile]:
+        """Files that are real medical reports with at least one reading."""
+        return [f for f in self.__files
+                if f.is_medical_report and f.has_measurements()]
     # ------------------------------------------------------------------
     # Conversion
     # ------------------------------------------------------------------
 
-    def to_dict(self) -> Dict[str, Optional[str]]:
+    def to_dict(self) -> Dict[str, str]:
         """Profile only (files are stored separately by the Data Manager)."""
-        return {"username": self.__username, "email": self.__email}
+        return {"username": self.__username}
 
     @classmethod
     def from_dict(cls, data: dict) -> "User":
-        return cls(data.get("username"), data.get("email"))
+        return cls(data.get("username"))
 
-    def __eq__(self, other) -> bool:
-        return isinstance(other, User) and other.username == self.__username
+    def __eq__(self, other: object) -> bool:
+        """Usernames are case-insensitive: 'Alice' and 'alice' are the same user."""
+        if not isinstance(other, User):
+            return NotImplemented
+        return self.key == other.key
 
     def __hash__(self) -> int:
-        return hash(self.__username)
+        return hash(self.key)
 
     def __repr__(self) -> str:
         return f"User(username={self.__username!r})"

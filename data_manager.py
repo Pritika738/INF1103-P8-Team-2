@@ -53,6 +53,19 @@ from data_layer import (
     default_medical_profile,
 )
 
+from data_layer import (
+    AccountRepository,
+    ConsultationPdfArchive,
+    JsonRecordRepository,
+    MedicalProfilePdfArchive,
+    MedicalProfileStore,
+    OriginalReportArchive,
+    RecordRepository,
+    SqliteAccountRepository,
+    SqliteRecordRepository,
+    default_medical_profile,
+)
+
 __all__ = [
     "DataManager", "RecordRepository", "JsonRecordRepository", "SqliteRecordRepository",
     "ConsultationPdfArchive", "OriginalReportArchive", "MedicalProfileStore",
@@ -68,7 +81,8 @@ class DataManager:
                  original_reports: OriginalReportArchive,
                  medical_profiles: MedicalProfileStore,
                  accounts: AccountRepository,
-                 manual_vitals: Optional[RecordRepository] = None):
+                 manual_vitals: Optional[RecordRepository] = None,
+                 medical_profile_pdfs: Optional[MedicalProfilePdfArchive] = None):
         self._records = records                      # aggregation: all injected
         self._consultation_pdfs = consultation_pdfs
         self._original_reports = original_reports
@@ -82,6 +96,11 @@ class DataManager:
             manual_vitals if manual_vitals is not None
             else JsonRecordRepository(MANUAL_VITALS_FILE)
         )
+        self._medical_profile_pdfs = (
+            medical_profile_pdfs
+            if medical_profile_pdfs is not None
+            else MedicalProfilePdfArchive()
+        )
 
     @classmethod
     def create(cls) -> "DataManager":
@@ -93,6 +112,7 @@ class DataManager:
             MedicalProfileStore(),
             SqliteAccountRepository(),
             JsonRecordRepository(MANUAL_VITALS_FILE),
+            MedicalProfilePdfArchive(),
         )
 
         # ------------------------------------------------------------------
@@ -311,3 +331,34 @@ class DataManager:
     def save_medical_profile(self, username: str, profile: Dict[str, Any]) -> bool:
         """Replace one user's medical profile. Returns True on success."""
         return self._medical_profiles.save(username, profile)
+
+    def save_medical_profile_pdf(
+    self,
+    pdf_bytes: bytes,
+    username: str
+    ) -> Optional[dict]:
+
+        return self._medical_profile_pdfs.save(
+            pdf_bytes,
+            username
+        )
+
+
+    def list_medical_profile_pdfs(
+        self,
+        username: str
+    ) -> List[dict]:
+
+        return self._medical_profile_pdfs.list_for_user(
+            username
+        )
+
+
+    def get_medical_profile_pdf_bytes(
+        self,
+        filename: str
+    ) -> Optional[bytes]:
+
+        return self._medical_profile_pdfs.read_pdf_bytes(
+            filename
+        )

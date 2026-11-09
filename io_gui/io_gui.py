@@ -1104,11 +1104,6 @@ USERNAME_PATTERN = re.compile(
     r"^[A-Za-z0-9_.-]{3,30}$"
 )
 
-# [0-9] rather than \d: Python's \d matches any Unicode decimal digit
-# (e.g. Arabic-indic 0-9), not just ASCII 0-9. "Digits only, reject
-# everything else" should mean ASCII digits specifically.
-PHONE_PATTERN = re.compile(r"^[0-9]{8}$")
-
 PASSWORD_ITERATIONS = 200_000
 
 ALLOWED_FILE_EXTENSIONS = {
@@ -1147,23 +1142,6 @@ def validate_username(username: str) -> str:
         )
 
     return ""
-
-
-def validate_phone(phone: str) -> str:
-
-    phone = phone.strip()
-
-    if not phone:
-        return "Please enter a phone number."
-
-    if not PHONE_PATTERN.fullmatch(phone):
-        return (
-            "Phone number must be exactly 8 digits, with no letters, "
-            "spaces or special characters."
-        )
-
-    return ""
-
 
 def validate_password(password: str) -> str:
 
@@ -1229,7 +1207,6 @@ def save_accounts(accounts: dict) -> None:
 
 def create_temporary_account(
     username: str,
-    phone: str,
     password: str
 ) -> tuple[bool, str]:
     """
@@ -1238,7 +1215,6 @@ def create_temporary_account(
     """
 
     username = username.strip()
-    phone = phone.strip()
 
     username_key = username.lower()
 
@@ -1248,21 +1224,12 @@ def create_temporary_account(
     if username_key in accounts:
         return (False, "That username is already taken.")
 
-    # Check duplicate phone number
-    for account in accounts.values():
-        if account.get("phone", "") == phone:
-            return (
-                False,
-                "An account already exists with this phone number."
-            )
-
     # Create random salt for password hashing
     salt = secrets.token_hex(16)
 
     # Store HASH, not actual password
     accounts[username_key] = {
         "username": username,
-        "phone": phone,
         "salt": salt,
         "password_hash": hash_password(password, salt)
     }
@@ -1578,19 +1545,36 @@ def show_login():
 
                 go("register")
 
-# --- Quick login with PIN -------------------------------------
-        # A convenience shortcut for users who have already set a
-        # 4-digit PIN (see show_settings()). Requires the username too,
-        # so it is unambiguous across accounts, and is rate-limited per
-        # session so it cannot be brute-forced. It never replaces the
-        # password login above - a user without a PIN simply uses that.
-        with st.container(border=True):
+            if st.button(
+                "Quick Login with PIN",
+                width="stretch"
+            ):
 
-            st.subheader("Quick login with PIN")
-            st.caption(
-                "Already set up a PIN? Enter your username and 4-digit "
-                "PIN for faster sign-in."
-            )
+                go("pin_login")
+
+def show_pin_login():
+
+    left, mid, right = st.columns([1, 1.4, 1])
+
+    with mid:
+
+        st.markdown(
+            "<div class='vt-hero' style='text-align:center;margin-top:2.5rem;'>"
+            "<div class='vt-bob' style='font-size:3.8rem;'>🔑</div>"
+            "<h1 style='margin:0;font-size:2.3rem;"
+            "background:linear-gradient(90deg,#a78bfa,#5eead4);"
+            "-webkit-background-clip:text;"
+            "-webkit-text-fill-color:transparent;'>"
+            "Quick Login with PIN"
+            "</h1>"
+            "<p style='color:var(--text-muted);'>"
+            "Enter your username and 4-digit PIN for faster sign-in."
+            "</p>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        with st.container(border=True):
 
             attempts = st.session_state.get("pin_attempts", 0)
 
@@ -1598,7 +1582,7 @@ def show_login():
 
                 st.error(
                     "Too many incorrect PIN attempts. Please sign in "
-                    "with your password above."
+                    "with your password instead."
                 )
 
             else:
@@ -1617,6 +1601,7 @@ def show_login():
 
                 if st.button(
                     "Log In with PIN",
+                    type="primary",
                     width="stretch",
                 ):
 
@@ -1630,31 +1615,64 @@ def show_login():
 
                         st.error(pin_error)
 
-                    elif authenticate_with_pin(pin_username, pin_value):
+                    elif authenticate_with_pin(
+                        pin_username,
+                        pin_value
+                    ):
 
                         accounts = load_accounts()
-                        account = accounts[pin_username.strip().lower()]
+
+                        account = accounts[
+                            pin_username.strip().lower()
+                        ]
 
                         st.session_state.username = account["username"]
-                        st.session_state.pop("pin_attempts", None)
+
+                        st.session_state.pop(
+                            "pin_attempts",
+                            None
+                        )
 
                         go("dashboard")
 
                     else:
 
-                        st.session_state["pin_attempts"] = attempts + 1
-                        remaining = PIN_MAX_ATTEMPTS - st.session_state["pin_attempts"]
+                        st.session_state["pin_attempts"] = (
+                            attempts + 1
+                        )
+
+                        remaining = (
+                            PIN_MAX_ATTEMPTS
+                            - st.session_state["pin_attempts"]
+                        )
 
                         if remaining > 0:
+
                             st.error(
                                 "Incorrect username or PIN. "
                                 f"{remaining} attempt(s) remaining."
                             )
+
                         else:
+
                             st.error(
-                                "Too many incorrect PIN attempts. Please "
-                                "sign in with your password above."
+                                "Too many incorrect PIN attempts. "
+                                "Please sign in with your password instead."
                             )
+
+            st.write("")
+
+            if st.button(
+                "Back to Login",
+                width="stretch"
+            ):
+
+                st.session_state.pop(
+                    "pin_attempts",
+                    None
+                )
+
+                go("login")
 
 def show_register():
 
@@ -1686,12 +1704,6 @@ def show_register():
                 key="register_username"
             )
 
-            phone = st.text_input(
-                "Phone number",
-                placeholder="81234567",
-                key="register_phone"
-            )
-
             password = st.text_input(
                 "Password",
                 type="password",
@@ -1721,11 +1733,6 @@ def show_register():
                     username
                 )
 
-                # Check phone number
-                phone_error = validate_phone(
-                    phone
-                )
-
                 # Check password strength
                 password_error = validate_password(
                     password
@@ -1735,12 +1742,6 @@ def show_register():
 
                     st.error(
                         username_error
-                    )
-
-                elif phone_error:
-
-                    st.error(
-                        phone_error
                     )
 
                 elif password_error:
@@ -1760,7 +1761,6 @@ def show_register():
                     created, message = (
                         create_temporary_account(
                             username,
-                            phone,
                             password
                         )
                     )
@@ -1871,6 +1871,268 @@ def show_dashboard():
             "see the Consultation page for details.</span>",
             unsafe_allow_html=True,
         )
+
+def build_medical_profile_pdf(who, profile):
+
+    try:
+        from fpdf import FPDF
+    except Exception:
+        return None, "PDF library is not installed."
+
+    def safe(text):
+        return str(text).encode(
+            "latin-1",
+            "replace"
+        ).decode("latin-1")
+
+    try:
+
+        pdf = FPDF()
+        pdf.add_page()
+
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.cell(
+            0,
+            10,
+            safe("PASSAY Medical Profile"),
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
+
+        pdf.set_font("Helvetica", "", 10)
+
+        pdf.cell(
+            0,
+            7,
+            safe(f"Patient: {who}"),
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
+
+        pdf.cell(
+            0,
+            7,
+            safe(
+                "Generated: "
+                + datetime.now().strftime("%d %B %Y, %H:%M")
+            ),
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
+
+        pdf.ln(5)
+
+        def section(title):
+
+            pdf.set_font("Helvetica", "B", 12)
+            pdf.cell(
+                0,
+                8,
+                safe(title),
+                new_x="LMARGIN",
+                new_y="NEXT",
+            )
+
+            pdf.set_font("Helvetica", "", 10)
+
+        def line(text):
+
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(
+                0,
+                6,
+                safe(text)
+            )
+
+        # Blood group
+        section("Blood Group")
+
+        line(
+            profile.get("blood_group")
+            or "Not recorded"
+        )
+
+        pdf.ln(2)
+
+        # Medications
+        section("Current Medications")
+
+        medications = profile.get(
+            "medications",
+            []
+        )
+
+        if medications:
+
+            for medication in medications:
+
+                dosage = ""
+
+                if medication.get("dosage_amount") is not None:
+
+                    dosage = str(
+                        medication.get("dosage_amount")
+                    )
+
+                    if medication.get("dosage_unit"):
+                        dosage += " " + medication["dosage_unit"]
+
+                text = "- " + medication.get(
+                    "name",
+                    ""
+                )
+
+                if dosage:
+                    text += ": " + dosage
+
+                if medication.get("frequency"):
+                    text += ", " + medication["frequency"]
+
+                line(text)
+
+        else:
+
+            line("None recorded")
+
+        pdf.ln(2)
+
+        # Allergies
+        section("Allergies")
+
+        allergies = profile.get(
+            "allergies",
+            []
+        )
+
+        if allergies:
+
+            for allergy in allergies:
+
+                text = "- " + allergy.get(
+                    "allergen",
+                    ""
+                )
+
+                if allergy.get("reaction"):
+                    text += " - Reaction: " + allergy["reaction"]
+
+                if allergy.get("severity"):
+                    text += " - Severity: " + allergy["severity"]
+
+                line(text)
+
+        else:
+
+            line("None recorded")
+
+        pdf.ln(2)
+
+        # Emergency contacts
+        section("Emergency Contacts")
+
+        contacts = profile.get(
+            "emergency_contacts",
+            []
+        )
+
+        if contacts:
+
+            for contact in contacts:
+
+                text = "- " + contact.get(
+                    "name",
+                    ""
+                )
+
+                if contact.get("relationship"):
+                    text += " (" + contact["relationship"] + ")"
+
+                if contact.get("phone"):
+                    text += " - " + contact["phone"]
+
+                if contact.get("email"):
+                    text += " - " + contact["email"]
+
+                line(text)
+
+        else:
+
+            line("None recorded")
+
+        pdf.ln(2)
+
+        # Hereditary illness
+        section("Hereditary Illness")
+
+        hereditary = profile.get(
+            "hereditary_illness",
+            {}
+        )
+
+        conditions = []
+
+        if hereditary.get("diabetes"):
+            conditions.append("Diabetes")
+
+        if hereditary.get("blood_pressure"):
+            conditions.append("Blood pressure")
+
+        if hereditary.get("heart_disease"):
+            conditions.append("Heart disease")
+
+        if hereditary.get("asthma"):
+            conditions.append("Asthma")
+
+        if hereditary.get("other"):
+            conditions.append(
+                hereditary["other"]
+            )
+
+        if conditions:
+
+            for condition in conditions:
+                line("- " + condition)
+
+        else:
+
+            line("None recorded")
+
+        if hereditary.get("notes"):
+
+            pdf.ln(1)
+
+            line(
+                "Notes: "
+                + hereditary["notes"]
+            )
+
+        pdf.ln(5)
+
+        pdf.set_font(
+            "Helvetica",
+            "I",
+            8
+        )
+
+        line(
+            "This document contains information entered by the "
+            "user and is intended to help communicate medical "
+            "history to healthcare professionals."
+        )
+
+        output = pdf.output()
+
+        if isinstance(
+            output,
+            (bytes, bytearray)
+        ):
+            return bytes(output), None
+
+        return output.encode("latin-1"), None
+
+    except Exception as exc:
+
+        return None, str(exc)
 
 def show_profile():
     hero("Medical Profile", "Your standing health information, ready for any appointment.")
@@ -2007,10 +2269,124 @@ def show_profile():
             for message in errors:
                 st.write("• " + message)
         elif data_service.save_medical_profile(username, cleaned):
-            st.success("Medical profile saved.")
-            st.rerun()
+
+            st.success("Medical profile saved successfully.")
+
+            pdf_bytes, pdf_error = build_medical_profile_pdf(
+                display_name() or username,
+                cleaned
+            )
+
+            if pdf_error:
+
+                st.warning(
+                    "Your medical profile was saved, but the PDF "
+                    "could not be generated."
+                )
+
+            else:
+
+                saved_pdf = data_service.save_medical_profile_pdf(
+                    pdf_bytes,
+                    username
+                )
+
+                if saved_pdf:
+
+                    st.success(
+                        "Medical profile PDF created successfully."
+                    )
+
+                    st.download_button(
+                        "Download latest medical profile (PDF)",
+                        data=pdf_bytes,
+                        file_name=saved_pdf["filename"],
+                        mime="application/pdf",
+                        key="latest_medical_profile_pdf",
+                    )
+
+                else:
+
+                    st.warning(
+                        "Your profile was saved, but the PDF "
+                        "could not be archived."
+                    )
         else:
             st.error("Could not save your profile. Please try again.")
+        
+    st.divider()
+
+    st.subheader("Medical Profile History")
+
+    st.caption(
+        "Previous versions of your saved medical profile."
+    )
+
+    profile_pdfs = (
+        data_service.list_medical_profile_pdfs(
+            username
+        )
+    )
+
+    if not profile_pdfs:
+
+        st.caption(
+            "Saved medical profile PDFs will appear here."
+        )
+
+    else:
+
+        for entry in profile_pdfs:
+
+            with st.container(border=True):
+
+                generated = _format_summary_timestamp(
+                    entry.get("generated_at")
+                )
+
+                cols = st.columns(
+                    [3, 2, 1]
+                )
+
+                with cols[0]:
+
+                    st.markdown(
+                        f"**{entry['filename']}**"
+                    )
+
+                with cols[1]:
+
+                    st.caption(
+                        f"Saved {generated}"
+                    )
+
+                with cols[2]:
+
+                    pdf_data = (
+                        data_service
+                        .get_medical_profile_pdf_bytes(
+                            entry["filename"]
+                        )
+                    )
+
+                    if pdf_data:
+
+                        st.download_button(
+                            "Download",
+                            data=pdf_data,
+                            file_name=entry["filename"],
+                            mime="application/pdf",
+                            key=(
+                                "medical_profile_"
+                                + entry["filename"]
+                            ),
+                        )
+
+                    else:
+
+                        st.caption(
+                            "File unavailable"
+                        )
 
 def show_settings():
     hero("Settings", "Manage how you sign in to PASSAY.")
@@ -2443,15 +2819,30 @@ def show_upload():
                     first_page = validated_pages[0]
 
                     with st.spinner("Sending report to the AI Manager..."):
+
                         ai_extracted = ai_service.extract_report(
-                            first_page["bytes"], first_page["mime_type"]
+                            first_page["bytes"],
+                            first_page["mime_type"]
                         )
 
+                        if ai_extracted is None:
+
+                            st.error(
+                                "AI analysis could not complete successfully. "
+                                "Please try again."
+                            )
+
+                            return
+
                         all_records = data_service.load_health_records()
-                        user_records = records_for_current_user(all_records)
+
+                        user_records = records_for_current_user(
+                            all_records
+                        )
 
                         processed_record = logic_manager.process_ai_record(
-                            ai_extracted, user_records
+                            ai_extracted,
+                            user_records
                         )
 
                     if processed_record["decision"] == "NOT_MEDICAL_REPORT":
@@ -2909,9 +3300,10 @@ def show_vitals():
         "Log readings you measure yourself - e.g. your daily blood pressure.",
     )
     st.caption(
-        "Self-logged readings are kept separately from your medical reports. "
-        "They do not appear in Health History, Health Trends or the "
-        "Consultation summary, which only use uploaded reports."
+    "Self-logged readings are kept separately from your medical reports. "
+    "They do not appear in Health History or Health Trends. "
+    "Relevant self-logged trends and changes are shown separately "
+    "in your Consultation Report."
     )
 
     username = current_user()
@@ -2933,41 +3325,101 @@ def show_vitals():
 
 
 def show_vitals_log_form(username):
-    """The entry form. Blank fields are simply not recorded, so a user
-    can log only blood pressure, only glucose, or anything in between."""
+    """Allow the user to choose which self-measured vitals to record."""
+
+    st.subheader("New reading")
+
+    selected_readings = st.multiselect(
+        "What would you like to log?",
+        options=[
+            "Blood pressure",
+            "Heart rate",
+            "Blood glucose",
+        ],
+        placeholder="Select one or more readings",
+        key="vitals_reading_types",
+        select_all=False,
+    )
+
+    if not selected_readings:
+        st.caption("Select at least one reading type to continue.")
+        return
+
+    # Unselected measurements stay None and therefore are not recorded.
+    systolic = None
+    diastolic = None
+    heart_rate = None
+    glucose = None
+
     with st.form("log_vitals_form", clear_on_submit=True):
-        st.subheader("New reading")
 
         c1, c2 = st.columns(2)
+
         with c1:
             measured_date = st.date_input(
-                "Date measured", value=date.today(), max_value=date.today(),
+                "Date measured",
+                value=date.today(),
+                max_value=date.today(),
                 format="DD/MM/YYYY",
             )
+
         with c2:
-            measured_time = st.time_input("Time measured", value=datetime.now().time())
+            measured_time = st.time_input(
+                "Time measured",
+                value=datetime.now().time()
+            )
 
-        st.markdown("*Blood pressure*")
-        b1, b2 = st.columns(2)
-        with b1:
-            systolic = st.number_input("Systolic (top number, mmHg)",
-                                       min_value=0, step=1, value=None)
-        with b2:
-            diastolic = st.number_input("Diastolic (bottom number, mmHg)",
-                                        min_value=0, step=1, value=None)
+        if "Blood pressure" in selected_readings:
 
-        o1, o2 = st.columns(2)
-        with o1:
-            heart_rate = st.number_input("Heart rate (bpm)", min_value=0, step=1, value=None)
-        with o2:
-            glucose = st.number_input("Blood glucose (mmol/L)", min_value=0.0,
-                                      step=0.1, format="%.1f", value=None)
+            st.markdown("*Blood pressure*")
 
-        note = st.text_input("Notes (optional)",
-                             placeholder="e.g. after morning walk, before breakfast",
-                             max_chars=logic_manager.ManualVitalsValidator.MAX_NOTE_LENGTH)
+            b1, b2 = st.columns(2)
 
-        submitted = st.form_submit_button("Save reading", type="primary")
+            with b1:
+                systolic = st.number_input(
+                    "Systolic (top number, mmHg)",
+                    min_value=0,
+                    step=1,
+                    value=None,
+                )
+
+            with b2:
+                diastolic = st.number_input(
+                    "Diastolic (bottom number, mmHg)",
+                    min_value=0,
+                    step=1,
+                    value=None,
+                )
+
+        if "Heart rate" in selected_readings:
+
+            heart_rate = st.number_input(
+                "Heart rate (bpm)",
+                min_value=0,
+                step=1,
+                value=None,
+            )
+
+        if "Blood glucose" in selected_readings:
+
+            glucose = st.number_input(
+                "Blood glucose (mmol/L)",
+                min_value=0.0,
+                step=0.1,
+                format="%.1f",
+                value=None,
+            )
+
+        note = st.text_input(
+            "Notes (optional)",
+            placeholder="e.g. after morning walk, before breakfast",
+            max_chars=logic_manager.ManualVitalsValidator.MAX_NOTE_LENGTH,
+        )
+
+        submitted = st.form_submit_button(
+            "Save reading",
+            type="primary"
+        )
 
     if not submitted:
         return
@@ -2989,16 +3441,21 @@ def show_vitals_log_form(username):
             st.error(message)
         return
 
-    # Compare only against this user's EARLIER self-logged readings
-    # (by when they were measured) - never against medical reports.
+    # Compare only against this user's earlier self-logged readings.
     measured_at = (cleaned["date"], cleaned["time"])
+
     previous = [
         e for e in data_service.list_manual_vitals(username)
         if (e.get("date") or "", e.get("time") or "") <= measured_at
     ]
-    result = vitals_logic.process_manual_reading(cleaned["metrics"], previous)
+
+    result = vitals_logic.process_manual_reading(
+        cleaned["metrics"],
+        previous
+    )
 
     entry = dict(cleaned)
+
     entry.update({
         "username": username,
         "source": "manual",
@@ -3015,13 +3472,23 @@ def show_vitals_log_form(username):
         st.error("Could not save this reading. Please try again.")
         return
 
-    severity = DECISION_SEVERITY.get(result["decision"], "info")
+    severity = DECISION_SEVERITY.get(
+        result["decision"],
+        "info"
+    )
+
     with st.container(border=True):
-        st.markdown("*Reading saved* &nbsp; " + severity_badge(severity),
-                    unsafe_allow_html=True)
+
+        st.markdown(
+            "*Reading saved* &nbsp; " + severity_badge(severity),
+            unsafe_allow_html=True
+        )
+
         st.write(result["summary"])
+
         if result["requires_doctor_review"]:
             st.warning(result["recommended_action"])
+
         for change in result["recent_changes"]:
             st.caption(change["feedback"])
 
@@ -3143,10 +3610,32 @@ def show_consultation():
     all_records = data_service.load_health_records()
     my_records = records_for_current_user(all_records)
 
-    if not my_records:
+    manual_vitals = data_service.list_manual_vitals(
+        current_user()
+    )
+
+    recent_manual_vitals = vitals_in_period(
+        manual_vitals,
+        30
+    )
+
+    manual_vital_trends = build_record_trends(
+        recent_manual_vitals
+    )
+
+    latest_manual_vital = (
+        recent_manual_vitals[-1]
+        if recent_manual_vitals
+        else None
+    )
+
+    if not my_records and not manual_vitals:
         with st.container(border=True):
-            st.markdown("### No report to prepare")
-            st.write("Add some medical records first, then generate your summary here.")
+            st.markdown("### No information to prepare")
+            st.write(
+                "Add a medical report or log some readings "
+                "in My Vitals first."
+            )
         return
 
     # Consultation preparation only uses the latest N report dates (see
@@ -3167,8 +3656,21 @@ def show_consultation():
     # "this exact summary is already saved" (see
     # data_manager.find_consultation_pdf_by_source()) instead of saving
     # a duplicate on every Streamlit rerun.
+    report_record_id = (
+        latest_processed_record.get("record_id")
+        if latest_processed_record
+        else None
+    )
+
+    vital_record_id = (
+        latest_manual_vital.get("record_id")
+        if latest_manual_vital
+        else None
+    )
+
     source_record_id = (
-        latest_processed_record.get("record_id") if latest_processed_record else None
+        f"report:{report_record_id or 'none'}"
+        f"|vital:{vital_record_id or 'none'}"
     )
 
     ai_narrative = None
@@ -3176,7 +3678,13 @@ def show_consultation():
         with st.spinner("Preparing your consultation summary..."):
             ai_narrative = ai_service.generate_narrative(latest_processed_record)
 
-    report = build_report(who, trends, ai_narrative)
+    report = build_report(
+        who,
+        trends,
+        ai_narrative,
+        manual_vital_trends,
+        latest_manual_vital
+    )
 
     with st.container(border=True):
         st.markdown("<div style='border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:8px;'>"
@@ -3199,6 +3707,74 @@ def show_consultation():
                     "<span style='color:var(--text-muted);font-size:0.85rem;'>" + t["note"] + "</span></div>"
                     "<div>" + severity_badge(t["severity"]) + "</div></div>",
                     unsafe_allow_html=True,
+                )
+
+        if report.get("manual_vital_trends"):
+
+            st.divider()
+
+            st.markdown(
+                "##### My Vitals — Self-logged readings"
+            )
+
+            st.caption(
+                "These readings were entered by you and are shown "
+                "separately from measurements extracted from medical reports."
+            )
+
+            for t in report["manual_vital_trends"]:
+
+                with st.container(border=True):
+
+                    left, right = st.columns([3, 1])
+
+                    with left:
+
+                        st.markdown(
+                            f"**{t['metric']}**"
+                        )
+
+                        st.caption(
+                            t["note"]
+                        )
+
+                    with right:
+
+                        st.markdown(
+                            "<div style='text-align:right;"
+                            "font-size:1.25rem;"
+                            "font-weight:800;"
+                            "color:var(--text-strong);'>"
+                            + str(t["latest"])
+                            + " "
+                            + t["unit"]
+                            + "</div>",
+                            unsafe_allow_html=True,
+                        )
+
+                        st.markdown(
+                            severity_badge(
+                                t["severity"]
+                            ),
+                            unsafe_allow_html=True,
+                        )
+
+            latest_manual = report.get(
+                "latest_manual_vital"
+            )
+
+            if (
+                latest_manual
+                and latest_manual.get(
+                    "requires_doctor_review"
+                )
+            ):
+
+                st.warning(
+                    latest_manual.get(
+                        "recommended_action",
+                        ""
+                    )
                 )
 
         if report["notes"]:
@@ -3273,7 +3849,13 @@ def show_consultation():
                     else:
                         st.caption("File unavailable")
 
-def build_report(who, trends, ai_narrative=None):
+def build_report(
+    who,
+    trends,
+    ai_narrative=None,
+    manual_vital_trends=None,
+    latest_manual_vital=None
+):
     """
     ai_narrative, if provided, is Gemini's own plain-language phrasing
     of logic_manager's already-decided findings (see
@@ -3297,7 +3879,13 @@ def build_report(who, trends, ai_narrative=None):
     else:
         summary = ""
 
-    return {"summary": summary, "notes": notes, "trends": trends}
+    return {
+        "summary": summary,
+        "notes": notes,
+        "trends": trends,
+        "manual_vital_trends": manual_vital_trends or [],
+        "latest_manual_vital": latest_manual_vital,
+    }
 
 def report_text(who, report):
     lines = ["Consultation Report for " + who,
@@ -3353,12 +3941,63 @@ def build_pdf(who, report):
                 para("- " + t["metric"] + ": " + str(t["latest"])
                      + " " + t["unit"] + " (" + t["note"] + ")")
             pdf.ln(2)
+        if report.get("manual_vital_trends"):
+
+            section(
+                "My Vitals - Self-logged readings"
+            )
+
+            para(
+                "These readings were entered by the user "
+                "and are shown separately from measurements "
+                "extracted from medical reports."
+            )
+
+            pdf.ln(1)
+
+            for t in report[
+                "manual_vital_trends"
+            ]:
+
+                para(
+                    "- "
+                    + t["metric"]
+                    + ": "
+                    + str(t["latest"])
+                    + " "
+                    + t["unit"]
+                    + " ("
+                    + t["note"]
+                    + ")"
+                )
+
+            latest_manual = report.get(
+                "latest_manual_vital"
+            )
+
+            if (
+                latest_manual
+                and latest_manual.get(
+                    "requires_doctor_review"
+                )
+            ):
+
+                pdf.ln(1)
+
+                para(
+                    "Attention: "
+                    + latest_manual.get(
+                        "recommended_action",
+                        ""
+                    )
+                )
+
+            pdf.ln(2)
         if report["notes"]:
             section("Note")
             for n in report["notes"]:
                 para("- " + n)
             pdf.ln(2)
-
         out = pdf.output()
         if isinstance(out, (bytes, bytearray)):
             return bytes(out), None
