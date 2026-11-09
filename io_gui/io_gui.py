@@ -1207,7 +1207,6 @@ def save_accounts(accounts: dict) -> None:
 
 def create_temporary_account(
     username: str,
-    phone: str,
     password: str
 ) -> tuple[bool, str]:
     """
@@ -1216,7 +1215,6 @@ def create_temporary_account(
     """
 
     username = username.strip()
-    phone = phone.strip()
 
     username_key = username.lower()
 
