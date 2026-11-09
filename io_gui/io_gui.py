@@ -1104,11 +1104,6 @@ USERNAME_PATTERN = re.compile(
     r"^[A-Za-z0-9_.-]{3,30}$"
 )
 
-# [0-9] rather than \d: Python's \d matches any Unicode decimal digit
-# (e.g. Arabic-indic 0-9), not just ASCII 0-9. "Digits only, reject
-# everything else" should mean ASCII digits specifically.
-PHONE_PATTERN = re.compile(r"^[0-9]{8}$")
-
 PASSWORD_ITERATIONS = 200_000
 
 ALLOWED_FILE_EXTENSIONS = {
