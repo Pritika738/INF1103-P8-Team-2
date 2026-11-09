@@ -1143,23 +1143,6 @@ def validate_username(username: str) -> str:
 
     return ""
 
-
-def validate_phone(phone: str) -> str:
-
-    phone = phone.strip()
-
-    if not phone:
-        return "Please enter a phone number."
-
-    if not PHONE_PATTERN.fullmatch(phone):
-        return (
-            "Phone number must be exactly 8 digits, with no letters, "
-            "spaces or special characters."
-        )
-
-    return ""
-
-
 def validate_password(password: str) -> str:
 
     if not password:
