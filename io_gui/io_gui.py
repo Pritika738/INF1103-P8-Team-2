@@ -23,6 +23,7 @@ import io_manager
 import logic_manager
 import data_manager
 import ai_manager
+from user import User
 
 # One AIManager for the whole app. The real Gemini client is injected
 # here, so everything below depends only on the AIClient interface.
@@ -1214,27 +1215,23 @@ def create_temporary_account(
     (users table of the app database, via the Data Manager).
     """
 
-    username = username.strip()
+    user = User(username)
 
-    username_key = username.lower()
-
-    accounts = load_accounts()
-
-    # Check duplicate username
-    if username_key in accounts:
+    # Check duplicate username (case-insensitive, via User.key)
+    if data_service.find_user(user.username) is not None:
         return (False, "That username is already taken.")
 
     # Create random salt for password hashing
     salt = secrets.token_hex(16)
 
     # Store HASH, not actual password
-    accounts[username_key] = {
-        "username": username,
+    credentials = {
         "salt": salt,
         "password_hash": hash_password(password, salt)
     }
 
-    save_accounts(accounts)
+    if not data_service.save_account(user, credentials):
+        return (False, "Your account could not be saved. Please try again.")
 
     return (True, "Account created successfully.")
 
