@@ -171,6 +171,22 @@ class DataManager:
         account = self._accounts.load_all().get(key)
         return User.from_dict(account) if account else None
 
+    def get_account(self, user: User) -> Optional[dict]:
+        """A copy of this user's stored account (password/PIN hashes), or None."""
+        if not isinstance(user, User):
+            raise TypeError("get_account expects a User object.")
+        account = self._accounts.load_all().get(user.key)
+        return dict(account) if account else None
+
+    def save_account(self, user: User, account: dict) -> bool:
+        """Insert or replace ONE user's account, leaving every other account
+        untouched. The stored username always comes from the User object."""
+        if not isinstance(user, User):
+            raise TypeError("save_account expects a User object.")
+        accounts = self._accounts.load_all()
+        accounts[user.key] = {**account, **user.to_dict()}
+        return self._accounts.save_all(accounts)
+
     # ------------------------------------------------------------------
     # Health records
     # ------------------------------------------------------------------
