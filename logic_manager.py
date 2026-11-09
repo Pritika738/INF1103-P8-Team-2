@@ -90,6 +90,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
+from file import ExtractedFile
+
 from logic_layer import (
     Tier, Decision,
     Finding,
@@ -322,6 +324,25 @@ class LogicManager:
 
         findings = self.evaluate(current_metrics, historical_records)
         return self._finalise(current_metrics, ai_extracted_date, findings)
+
+    def process_file(self, extracted_file: ExtractedFile,
+                     historical_records: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """process() for an already-validated ExtractedFile.
+
+        Same rules, same output dict - the file object supplies the
+        classification, metrics and report date directly.
+        """
+        if not isinstance(extracted_file, ExtractedFile):
+            raise TypeError("process_file expects an ExtractedFile object.")
+        if not extracted_file.is_medical_report:
+            return self._not_medical_result(extracted_file.classification_reason)
+
+        current_metrics = extracted_file.metrics
+        if not extracted_file.has_measurements():
+            return self._rejected_result(current_metrics, extracted_file.report_date)
+
+        findings = self.evaluate(current_metrics, historical_records)
+        return self._finalise(current_metrics, extracted_file.report_date, findings)
 
     def _not_medical_result(self, reason: Optional[str]) -> Dict[str, Any]:
         """Result for a file the AI classified as not a medical report."""
