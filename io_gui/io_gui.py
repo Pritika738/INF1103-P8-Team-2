@@ -1704,12 +1704,6 @@ def show_register():
                 key="register_username"
             )
 
-            phone = st.text_input(
-                "Phone number",
-                placeholder="81234567",
-                key="register_phone"
-            )
-
             password = st.text_input(
                 "Password",
                 type="password",
@@ -1739,11 +1733,6 @@ def show_register():
                     username
                 )
 
-                # Check phone number
-                phone_error = validate_phone(
-                    phone
-                )
-
                 # Check password strength
                 password_error = validate_password(
                     password
@@ -1753,12 +1742,6 @@ def show_register():
 
                     st.error(
                         username_error
-                    )
-
-                elif phone_error:
-
-                    st.error(
-                        phone_error
                     )
 
                 elif password_error:
