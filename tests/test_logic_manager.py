@@ -22,6 +22,8 @@ from rules import (
     UrgentThresholdRule, PersistentTrendRule, RecentChangeRule,
 )
 from logic_manager import LogicManager
+from medical_profile_validator import MedicalProfileValidator
+from manual_vitals_validator import ManualVitalsValidator
 
 
 # ---------------------------------------------------------------------------
@@ -239,3 +241,71 @@ def test_process_preserves_extracted_date():
     ai = {"heart_rate": 72, "report_date": "2026-09-22"}
     result = _engine().process(ai, [])
     assert result["ai_extracted_date"] == "2026-09-22"
+
+
+# ---------------------------------------------------------------------------
+# MedicalProfileValidator - validates standing reference data. Returns
+# (cleaned, errors) and never mutates its input.
+# ---------------------------------------------------------------------------
+
+def test_profile_rejects_unknown_blood_group():
+    cleaned, errors = MedicalProfileValidator().validate({"blood_group": "XX"})
+    assert any("blood group" in e for e in errors)
+
+
+def test_profile_accepts_known_blood_group():
+    cleaned, errors = MedicalProfileValidator().validate({"blood_group": "O+"})
+    assert cleaned["blood_group"] == "O+"
+    assert errors == []
+
+
+def test_profile_medication_requires_name():
+    _, errors = MedicalProfileValidator().validate(
+        {"blood_group": "", "medications": [{"name": "", "dosage_amount": "5"}]})
+    assert any("name is required" in e for e in errors)
+
+
+def test_profile_does_not_mutate_input():
+    original = {"blood_group": "O+", "medications": []}
+    MedicalProfileValidator().validate(original)
+    assert original == {"blood_group": "O+", "medications": []}
+
+
+# ---------------------------------------------------------------------------
+# ManualVitalsValidator - plausibility checks on a self-logged entry.
+# ---------------------------------------------------------------------------
+
+def test_manual_vitals_rejects_future_date():
+    _, errors = ManualVitalsValidator().validate(
+        {"date": "2099-01-01", "metrics": {"heart_rate": 80}},
+        today="2026-01-01")
+    assert any("future" in e for e in errors)
+
+
+def test_manual_vitals_flags_implausible_value():
+    _, errors = ManualVitalsValidator().validate(
+        {"date": "2026-01-01", "metrics": {"heart_rate": 999}},
+        today="2026-01-01")
+    assert any("heart rate" in e.lower() for e in errors)
+
+
+def test_manual_vitals_requires_bp_as_pair():
+    _, errors = ManualVitalsValidator().validate(
+        {"date": "2026-01-01",
+         "metrics": {"blood_pressure_systolic": 120}},
+        today="2026-01-01")
+    assert any("both systolic and diastolic" in e for e in errors)
+
+
+def test_manual_vitals_requires_at_least_one_measurement():
+    _, errors = ManualVitalsValidator().validate(
+        {"date": "2026-01-01", "metrics": {}}, today="2026-01-01")
+    assert any("at least one measurement" in e for e in errors)
+
+
+def test_manual_vitals_accepts_valid_entry():
+    cleaned, errors = ManualVitalsValidator().validate(
+        {"date": "2026-01-01", "metrics": {"heart_rate": 72}},
+        today="2026-01-01")
+    assert errors == []
+    assert cleaned["metrics"]["heart_rate"] == 72
