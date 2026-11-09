@@ -2269,7 +2269,48 @@ def show_profile():
             for message in errors:
                 st.write("• " + message)
         elif data_service.save_medical_profile(username, cleaned):
+
             st.success("Medical profile saved successfully.")
+
+            pdf_bytes, pdf_error = build_medical_profile_pdf(
+                display_name() or username,
+                cleaned
+            )
+
+            if pdf_error:
+
+                st.warning(
+                    "Your medical profile was saved, but the PDF "
+                    "could not be generated."
+                )
+
+            else:
+
+                saved_pdf = data_service.save_medical_profile_pdf(
+                    pdf_bytes,
+                    username
+                )
+
+                if saved_pdf:
+
+                    st.success(
+                        "Medical profile PDF created successfully."
+                    )
+
+                    st.download_button(
+                        "Download latest medical profile (PDF)",
+                        data=pdf_bytes,
+                        file_name=saved_pdf["filename"],
+                        mime="application/pdf",
+                        key="latest_medical_profile_pdf",
+                    )
+
+                else:
+
+                    st.warning(
+                        "Your profile was saved, but the PDF "
+                        "could not be archived."
+                    )
         else:
             st.error("Could not save your profile. Please try again.")
 
