@@ -71,18 +71,16 @@ MAX_RETAINED_SUMMARY_PDFS = None
 # Name of the Gemini model to use. "gemini-flash-latest" is an alias that
 # Google always points at their current Flash model, so we don't have to
 # update this string every time a newer Flash version is released.
-AI_MODEL_NAME = "gemini-3.8-flash"
+AI_MODEL_NAME = "gemini-3.6-flash"
 
 AI_FALLBACK_MODELS = [
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
+    "gemini-2.5-flash",
 ]
 # The actual key value must never be committed to source control.
 API_KEY_ENV_VAR = "GEMINI_API_KEY"
 
 # Maximum number of times ai_manager should retry a failed AI call.
-AI_MAX_RETRIES = 2
+AI_MAX_RETRIES = 1
 # Base wait time in between each retry 
 BASE_DELAY = 5
 

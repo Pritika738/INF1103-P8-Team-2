@@ -70,9 +70,20 @@ class GeminiClient(AIClient):
                 raise AIServiceError("A file was provided without a MIME type.")
             contents.append(types.Part.from_bytes(data=file_bytes, mime_type=mime_type))
 
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(
+                timeout=45000
+            )
+        )
 
-        for model_name in self.__models:
+        models_to_try = (
+            ["gemini-3.1-pro-preview", *self.__models]
+            if mime_type == "application/pdf"
+            else self.__models
+        )
+
+        for model_name in dict.fromkeys(models_to_try):
             try:
                 response = client.models.generate_content(model=model_name, contents=contents)
             except genai_errors.APIError as exc:
