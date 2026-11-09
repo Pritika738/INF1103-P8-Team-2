@@ -2007,8 +2007,7 @@ def show_profile():
             for message in errors:
                 st.write("• " + message)
         elif data_service.save_medical_profile(username, cleaned):
-            st.success("Medical profile saved.")
-            st.rerun()
+            st.success("Medical profile saved successfully.")
         else:
             st.error("Could not save your profile. Please try again.")
 
