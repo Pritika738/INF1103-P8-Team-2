@@ -3595,6 +3595,25 @@ def show_consultation():
     all_records = data_service.load_health_records()
     my_records = records_for_current_user(all_records)
 
+    manual_vitals = data_service.list_manual_vitals(
+        current_user()
+    )
+
+    recent_manual_vitals = vitals_in_period(
+        manual_vitals,
+        30
+    )
+
+    manual_vital_trends = build_record_trends(
+        recent_manual_vitals
+    )
+
+    latest_manual_vital = (
+        recent_manual_vitals[-1]
+        if recent_manual_vitals
+        else None
+    )
+
     if not my_records:
         with st.container(border=True):
             st.markdown("### No report to prepare")
