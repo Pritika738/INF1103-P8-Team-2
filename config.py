@@ -31,6 +31,7 @@ USERS_FILE = os.path.join(DATA_DIR, "users.json")
 # of DATABASE_FILE; the JSON file is kept only as the migration source.
 CONSULTATION_PDF_DIR = os.path.join(DATA_DIR, "consultation_pdfs")
 CONSULTATION_SUMMARIES_FILE = os.path.join(DATA_DIR, "consultation_summaries.json")
+MEDICAL_PROFILE_PDF_DIR = os.path.join(DATA_DIR, "medical_profile_pdfs")
 
 # Original uploaded medical report files (the actual PDF/image the user
 # uploaded, kept verbatim) - completely separate from both the health
