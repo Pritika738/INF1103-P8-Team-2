@@ -3650,7 +3650,13 @@ def show_consultation():
         with st.spinner("Preparing your consultation summary..."):
             ai_narrative = ai_service.generate_narrative(latest_processed_record)
 
-    report = build_report(who, trends, ai_narrative)
+    report = build_report(
+        who,
+        trends,
+        ai_narrative,
+        manual_vital_trends,
+        latest_manual_vital
+    )
 
     with st.container(border=True):
         st.markdown("<div style='border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:8px;'>"
@@ -3747,7 +3753,13 @@ def show_consultation():
                     else:
                         st.caption("File unavailable")
 
-def build_report(who, trends, ai_narrative=None):
+def build_report(
+    who,
+    trends,
+    ai_narrative=None,
+    manual_vital_trends=None,
+    latest_manual_vital=None
+):
     """
     ai_narrative, if provided, is Gemini's own plain-language phrasing
     of logic_manager's already-decided findings (see
@@ -3771,7 +3783,13 @@ def build_report(who, trends, ai_narrative=None):
     else:
         summary = ""
 
-    return {"summary": summary, "notes": notes, "trends": trends}
+    return {
+        "summary": summary,
+        "notes": notes,
+        "trends": trends,
+        "manual_vital_trends": manual_vital_trends or [],
+        "latest_manual_vital": latest_manual_vital,
+    }
 
 def report_text(who, report):
     lines = ["Consultation Report for " + who,
