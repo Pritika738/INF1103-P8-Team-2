@@ -1310,7 +1310,8 @@ def user_has_pin(username: str) -> bool:
     Return True if username has a quick-login PIN set, False otherwise
     (including when the account does not exist).
     """
-    account = load_accounts().get(username.strip().lower())
+    user = data_service.find_user(username)
+    account = data_service.get_account(user) if user else None
     return bool(account and account.get("pin_hash") and account.get("pin_salt"))
 
 def set_user_pin(username: str, pin: str) -> bool:
@@ -1320,22 +1321,16 @@ def set_user_pin(username: str, pin: str) -> bool:
     untouched. Returns True on success, False if the account does not
     exist or the save failed.
     """
-    username_key = username.strip().lower()
-    accounts = load_accounts()
-    account = accounts.get(username_key)
-    if account is None:
+    user = data_service.find_user(username)
+    if user is None:
         return False
+    account = data_service.get_account(user)
 
     pin_salt = secrets.token_hex(16)
     account["pin_salt"] = pin_salt
     account["pin_hash"] = hash_pin(pin, pin_salt)
-    accounts[username_key] = account
 
-    try:
-        save_accounts(accounts)
-        return True
-    except OSError:
-        return False
+    return data_service.save_account(user, account)
 
 def remove_user_pin(username: str) -> bool:
     """
@@ -1343,38 +1338,35 @@ def remove_user_pin(username: str) -> bool:
     again). Safe to call when no PIN is set. Returns True on success,
     False if the account does not exist or the save failed.
     """
-    username_key = username.strip().lower()
-    accounts = load_accounts()
-    account = accounts.get(username_key)
-    if account is None:
+    user = data_service.find_user(username)
+    if user is None:
         return False
+    account = data_service.get_account(user)
 
     account.pop("pin_salt", None)
     account.pop("pin_hash", None)
-    accounts[username_key] = account
 
-    try:
-        save_accounts(accounts)
-        return True
-    except OSError:
-        return False
+    return data_service.save_account(user, account)
 
-def authenticate_with_pin(username: str, pin: str) -> bool:
+def authenticate_with_pin(username: str, pin: str) -> User | None:
     """
     Verify a username + quick-login PIN pair against the stored salted
-    PIN hash. Returns False if the account doesn't exist, has no PIN
-    set, or the PIN doesn't match. Uses hmac.compare_digest() to avoid
-    leaking timing information, same as the password check above.
+    PIN hash. Returns the matching User, or None if the account doesn't
+    exist, has no PIN set, or the PIN doesn't match. Uses
+    hmac.compare_digest() to avoid leaking timing information, same as
+    the password check above.
     """
-    username_key = username.strip().lower()
-    account = load_accounts().get(username_key)
-    if account is None:
-        return False
+    user = data_service.find_user(username)
+    if user is None:
+        return None
+    account = data_service.get_account(user)
     if not (account.get("pin_hash") and account.get("pin_salt")):
-        return False
+        return None
 
     entered_hash = hash_pin(pin, account["pin_salt"])
-    return hmac.compare_digest(entered_hash, account["pin_hash"])
+    if hmac.compare_digest(entered_hash, account["pin_hash"]):
+        return user
+    return None
 
 def validate_uploaded_report(
     uploaded_file
@@ -1605,19 +1597,12 @@ def show_pin_login():
 
                         st.error(pin_error)
 
-                    elif authenticate_with_pin(
+                    elif (user := authenticate_with_pin(
                         pin_username,
                         pin_value
-                    ):
+                    )) is not None:
 
-                        accounts = load_accounts()
-
-                        account = accounts[
-                            pin_username.strip().lower()
-                        ]
-
-                        st.session_state.username = account["username"]
-
+                        st.session_state.username = user.username
                         st.session_state.pop(
                             "pin_attempts",
                             None
