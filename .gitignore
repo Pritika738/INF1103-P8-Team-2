@@ -8,9 +8,6 @@ venv/
 
 # Local application data
 data/app.db
-data/manual_vitals.json
-data/medical_profiles.json
-data/medical_profile_pdfs/
 data/consultation_pdfs/
 data/original_reports/
 
