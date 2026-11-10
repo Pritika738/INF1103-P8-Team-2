@@ -40,7 +40,7 @@ from datetime import date as _date
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from config import LATEST_REPORTS_LIMIT, MANUAL_VITALS_FILE
+from config import LATEST_REPORTS_LIMIT
 
 from data_layer import (
     AccountRepository,
@@ -52,6 +52,7 @@ from data_layer import (
     RecordRepository,
     SqliteAccountRepository,
     SqliteRecordRepository,
+    SqliteVitalsRepository,
     default_medical_profile,
 )
 
@@ -61,7 +62,7 @@ from user import User
 __all__ = [
     "DataManager", "RecordRepository", "JsonRecordRepository", "SqliteRecordRepository",
     "ConsultationPdfArchive", "OriginalReportArchive", "MedicalProfileStore",
-    "AccountRepository", "SqliteAccountRepository",
+    "AccountRepository", "SqliteAccountRepository", "SqliteVitalsRepository",
 ]
 
 
@@ -80,13 +81,13 @@ class DataManager:
         self._original_reports = original_reports
         self._medical_profiles = medical_profiles
         self._accounts = accounts
-        # Self-logged vitals use the SAME repository class as report
-        # records, just pointed at a different file - so they are stored
-        # completely apart from health_records.json. Optional so callers
+        # Self-logged vitals use the same RecordRepository interface as
+        # report records, but their own "vitals" table - so they are stored
+        # completely apart from the health records. Optional so callers
         # (and tests) that don't use self-logged vitals can leave it out.
         self._manual_vitals = (
             manual_vitals if manual_vitals is not None
-            else JsonRecordRepository(MANUAL_VITALS_FILE)
+            else SqliteVitalsRepository()
         )
         self._medical_profile_pdfs = (
             medical_profile_pdfs
@@ -103,7 +104,7 @@ class DataManager:
             OriginalReportArchive(),
             MedicalProfileStore(),
             SqliteAccountRepository(),
-            JsonRecordRepository(MANUAL_VITALS_FILE),
+            SqliteVitalsRepository(),
             MedicalProfilePdfArchive(),
         )
 

@@ -36,6 +36,7 @@ def paths(tmp_path):
         "reports": str(tmp_path / "reports"),
         "profiles": str(tmp_path / "profiles.json"),
         "accounts": str(tmp_path / "users.json"),
+        "vitals": str(tmp_path / "vitals.json"),
     }
 
 
@@ -48,6 +49,7 @@ def make_manager(paths):
             OriginalReportArchive(paths["reports"], JsonListStore(paths["meta"])),
             MedicalProfileStore(paths["profiles"]),
             JsonAccountRepository(paths["accounts"]),
+            JsonRecordRepository(paths["vitals"]),
         )
     return _make
 
@@ -97,6 +99,7 @@ class TestDesign:
             OriginalReportArchive(paths["reports"], JsonListStore(paths["meta"])),
             MedicalProfileStore(paths["profiles"]),
             JsonAccountRepository(paths["accounts"]),
+            JsonRecordRepository(paths["vitals"]),
         )
         assert dm.save_record({"username": "ann", "date": "2026-01-01"}) is True
         assert dm.get_records_by_date("2026-01-01")[0]["username"] == "ann"
