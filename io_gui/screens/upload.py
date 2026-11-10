@@ -9,7 +9,7 @@ import streamlit as st
 import logic_manager
 
 from core import (
-    hero, severity_badge, current_user, data_service, ai_service,
+    hero, severity_badge, current_user, data_service, ai_service, logic_service,
     records_for_current_user, validate_uploaded_report,
     DECISION_SEVERITY, METRIC_UNITS,
 )
@@ -118,13 +118,15 @@ def show_upload():
                 else:
                     first_page = validated_pages[0]
                     with st.spinner("Sending report to the AI Manager..."):
-                        ai_extracted = ai_service.extract_report(first_page["bytes"], first_page["mime_type"])
-                        if ai_extracted is None:
+                        extracted_file = ai_service.extract_file(
+                            first_page["bytes"], first_page["mime_type"], first_page["name"]
+                        )
+                        if extracted_file is None:
                             st.error("AI analysis could not complete successfully. Please try again.")
                             return
                         all_records = data_service.load_health_records()
                         user_records = records_for_current_user(all_records)
-                        processed_record = logic_manager.process_ai_record(ai_extracted, user_records)
+                        processed_record = logic_service.process_file(extracted_file, user_records)
                     if processed_record["decision"] == "NOT_MEDICAL_REPORT":
                         st.error("**Invalid Medical Report**")
                         st.write(processed_record["recommended_action"])

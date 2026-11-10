@@ -30,9 +30,10 @@ import data_manager
 import ai_manager
 from user import User
 
-# One AIManager and one DataManager for the whole app.
+# One AIManager, DataManager and LogicManager for the whole app.
 ai_service = ai_manager.AIManager(ai_manager.GeminiClient())
 data_service = data_manager.DataManager.create()
+logic_service = logic_manager.LogicManager.default()
 
 if "page" not in st.session_state:
     st.session_state.page = "login"
