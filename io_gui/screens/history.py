@@ -67,10 +67,11 @@ def show_history():
                 if st.button("Detect date from original file with AI"):
                     with st.spinner("Asking the AI Manager to re-read the report date..."):
                         original_bytes = data_service.get_original_report_bytes(original_entry["stored_filename"])
-                        ai_extracted = (ai_service.extract_report(
-                            original_bytes, original_entry.get("mime_type", "application/pdf"))
+                        extracted_file = (ai_service.extract_file(
+                            original_bytes, original_entry.get("mime_type", "application/pdf"),
+                            original_entry["stored_filename"])
                             if original_bytes else None)
-                    detected_date = (ai_extracted or {}).get("report_date")
+                    detected_date = extracted_file.report_date if extracted_file else None
                     if detected_date:
                         st.session_state["detected_date_" + selected_id] = detected_date
                     else:
