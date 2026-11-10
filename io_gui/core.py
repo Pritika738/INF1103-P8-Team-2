@@ -28,6 +28,7 @@ import io_manager
 import logic_manager
 import data_manager
 import ai_manager
+from user import User
 
 # One AIManager and one DataManager for the whole app.
 ai_service = ai_manager.AIManager(ai_manager.GeminiClient())
@@ -381,15 +382,13 @@ def save_accounts(accounts: dict) -> None:
         raise OSError("Could not save accounts to the database.")
 
 def create_temporary_account(username: str, password: str):
-    username = username.strip()
-    username_key = username.lower()
-    accounts = load_accounts()
-    if username_key in accounts:
+    user = User(username)
+    if data_service.find_user(user.username) is not None:
         return (False, "That username is already taken.")
     salt = secrets.token_hex(16)
-    accounts[username_key] = {"username": username, "salt": salt,
-                              "password_hash": hash_password(password, salt)}
-    save_accounts(accounts)
+    credentials = {"salt": salt, "password_hash": hash_password(password, salt)}
+    if not data_service.save_account(user, credentials):
+        return (False, "Your account could not be saved. Please try again.")
     return (True, "Account created successfully.")
 
 def authenticate_temporary_account(username: str, password: str) -> bool:
