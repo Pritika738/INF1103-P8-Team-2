@@ -3,7 +3,7 @@
 import streamlit as st
 
 from core import (
-    hero, go, load_accounts,
+    hero, go,
     authenticate_temporary_account, authenticate_with_pin,
     validate_username, validate_password, validate_pin,
     create_temporary_account, PIN_MAX_ATTEMPTS,
@@ -31,12 +31,10 @@ def show_login():
                     st.error("Please enter your username.")
                 elif not password:
                     st.error("Please enter your password.")
-                elif not authenticate_temporary_account(username, password):
+                elif (user := authenticate_temporary_account(username, password)) is None:
                     st.error("Incorrect username or password.")
                 else:
-                    accounts = load_accounts()
-                    account = accounts[username.strip().lower()]
-                    st.session_state.username = account["username"]
+                    st.session_state.username = user.username
                     go("dashboard")
             st.caption("Don't have an account?")
             if st.button("Create Account", width="stretch"):
@@ -70,10 +68,8 @@ def show_pin_login():
                         st.error("Please enter your username.")
                     elif pin_error:
                         st.error(pin_error)
-                    elif authenticate_with_pin(pin_username, pin_value):
-                        accounts = load_accounts()
-                        account = accounts[pin_username.strip().lower()]
-                        st.session_state.username = account["username"]
+                    elif (user := authenticate_with_pin(pin_username, pin_value)) is not None:
+                        st.session_state.username = user.username
                         st.session_state.pop("pin_attempts", None)
                         go("dashboard")
                     else:

@@ -391,13 +391,16 @@ def create_temporary_account(username: str, password: str):
         return (False, "Your account could not be saved. Please try again.")
     return (True, "Account created successfully.")
 
-def authenticate_temporary_account(username: str, password: str) -> bool:
-    username_key = username.strip().lower()
-    account = load_accounts().get(username_key)
-    if account is None:
-        return False
+def authenticate_temporary_account(username: str, password: str) -> User | None:
+    """The matching User if the username and password are correct, else None."""
+    user = data_service.find_user(username)
+    if user is None:
+        return None
+    account = data_service.get_account(user)
     entered_hash = hash_password(password, account["salt"])
-    return hmac.compare_digest(entered_hash, account["password_hash"])
+    if hmac.compare_digest(entered_hash, account["password_hash"]):
+        return user
+    return None
 
 # --- Quick-login PIN ---
 def validate_pin(pin: str) -> str:
@@ -447,15 +450,18 @@ def remove_user_pin(username: str) -> bool:
     except OSError:
         return False
 
-def authenticate_with_pin(username: str, pin: str) -> bool:
-    username_key = username.strip().lower()
-    account = load_accounts().get(username_key)
-    if account is None:
-        return False
+def authenticate_with_pin(username: str, pin: str) -> User | None:
+    """The matching User if the username and PIN are correct, else None."""
+    user = data_service.find_user(username)
+    if user is None:
+        return None
+    account = data_service.get_account(user)
     if not (account.get("pin_hash") and account.get("pin_salt")):
-        return False
+        return None
     entered_hash = hash_pin(pin, account["pin_salt"])
-    return hmac.compare_digest(entered_hash, account["pin_hash"])
+    if hmac.compare_digest(entered_hash, account["pin_hash"]):
+        return user
+    return None
 
 def validate_uploaded_report(uploaded_file):
     if uploaded_file is None:
