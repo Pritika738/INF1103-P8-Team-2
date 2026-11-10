@@ -76,9 +76,12 @@ def show_dashboard():
     latest_record = latest_record_for_user(my_records)
     latest_metrics = latest_record.get("metrics", {}) if latest_record else {}
     is_flagged = bool(latest_record and latest_record.get("requires_doctor_review"))
+    # The signed-in User, holding one ExtractedFile per saved report.
+    user = data_service.load_user(current_user())
+    reports_on_file = user.file_count if user else len(my_records)
     c1, c2, c3 = st.columns(3)
     with c1:
-        stat_tile("Reports on file", len(my_records), "#a78bfa")
+        stat_tile("Reports on file", reports_on_file, "#a78bfa")
     with c2:
         stat_tile("Latest report", latest_record.get("date", "Unknown") if latest_record else "-", "#5eead4")
     with c3:
