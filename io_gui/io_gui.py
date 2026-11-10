@@ -16,7 +16,7 @@ st.set_page_config(
 )
 
 from styles import inject_css
-import core  # noqa: F401  (ensures session_state.page default is set)
+import core  # noqa: F401
 from screens import (
     sidebar_nav, show_login, show_pin_login, show_register,
     show_dashboard, show_upload, show_history, show_trends,
@@ -24,6 +24,12 @@ from screens import (
 )
 
 inject_css()
+
+# Every new browser session starts on the login page. This must run on
+# every script run: core.py is imported only once per server process, so
+# a default set there would only reach the very first session.
+if "page" not in st.session_state:
+    st.session_state.page = "login"
 
 if st.session_state.page in ("login", "register", "pin_login"):
 
