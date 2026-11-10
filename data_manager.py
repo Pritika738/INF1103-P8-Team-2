@@ -123,34 +123,25 @@ class DataManager:
         entry_to_save.setdefault("record_id", uuid.uuid4().hex)
         entry_to_save.setdefault("logged_at", datetime.now().isoformat(timespec="seconds"))
 
-        entries = self._manual_vitals.load_all()
-        entries.append(entry_to_save)
-        return entry_to_save if self._manual_vitals.save_all(entries) else None
+        # One INSERT into the vitals table - earlier entries are not rewritten.
+        return entry_to_save if self._manual_vitals.add(entry_to_save) else None
 
     def list_manual_vitals(self, username: str) -> List[dict]:
         """One user's self-logged vitals, sorted oldest to newest by the
         date (and time, if given) they were MEASURED - not when typed in.
         Entries measured at the same moment keep their save order."""
-        mine = [
-            (index, e) for index, e in enumerate(self._manual_vitals.load_all())
-            if e.get("username") == username
-        ]
-        mine.sort(key=lambda pair: (pair[1].get("date") or "",
-                                    pair[1].get("time") or "", pair[0]))
-        return [e for _, e in mine]
+        # The repository filters by user in the query and returns rows in
+        # save order; sorted() is stable, so ties keep that order.
+        return sorted(
+            self._manual_vitals.list_for_user(username),
+            key=lambda e: (e.get("date") or "", e.get("time") or ""),
+        )
 
     def delete_manual_vital(self, username: str, record_id: str) -> bool:
         """Delete one self-logged entry by its record_id. Only the owner's
         own entry can be deleted. Returns True if one was found and the
-        save succeeded, False otherwise."""
-        entries = self._manual_vitals.load_all()
-        kept = [
-            e for e in entries
-            if not (e.get("record_id") == record_id and e.get("username") == username)
-        ]
-        if len(kept) == len(entries):
-            return False
-        return self._manual_vitals.save_all(kept)
+        delete succeeded, False otherwise."""
+        return self._manual_vitals.delete(username, record_id)
 
     # ------------------------------------------------------------------
     # Login accounts

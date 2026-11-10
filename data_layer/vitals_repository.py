@@ -75,6 +75,9 @@ _INSERT_SQL = "INSERT INTO vitals ({}) VALUES ({})".format(
     ", ".join(_ALL_COLUMNS), ", ".join("?" for _ in _ALL_COLUMNS)
 )
 _SELECT_SQL = "SELECT {} FROM vitals ORDER BY id".format(", ".join(_ALL_COLUMNS))
+_SELECT_USER_SQL = "SELECT {} FROM vitals WHERE username = ? ORDER BY id".format(
+    ", ".join(_ALL_COLUMNS)
+)
 
 
 def _entry_to_row(entry: dict) -> tuple:
@@ -143,7 +146,8 @@ class SqliteVitalsRepository(RecordRepository):
 
     def save_all(self, entries: List[dict]) -> bool:
         """Replace all stored entries in ONE transaction: either every entry
-        is written or, on any failure, the previous contents are kept."""
+        is written or, on any failure, the previous contents are kept.
+        Used by the migration script; day-to-day saves use add()."""
         try:
             rows = [_entry_to_row(e) for e in entries]
             with closing(self._connect()) as conn:
@@ -152,4 +156,43 @@ class SqliteVitalsRepository(RecordRepository):
                     conn.executemany(_INSERT_SQL, rows)
             return True
         except (sqlite3.Error, OSError, TypeError, ValueError, AttributeError):
+            return False
+
+    # ------------------------------------------------------------------
+    # Direct single-row queries (override the load-everything defaults)
+    # ------------------------------------------------------------------
+
+    def add(self, entry: dict) -> bool:
+        """INSERT one entry as a new row; existing rows are never touched.
+        False on failure, including a record_id that is already stored."""
+        try:
+            row = _entry_to_row(entry)
+            with closing(self._connect()) as conn:
+                with conn:
+                    conn.execute(_INSERT_SQL, row)
+            return True
+        except (sqlite3.Error, OSError, TypeError, ValueError, AttributeError):
+            return False
+
+    def list_for_user(self, username: str) -> List[dict]:
+        """SELECT one user's entries, in the order they were saved; [] on failure."""
+        try:
+            with closing(self._connect()) as conn:
+                return [_row_to_entry(row)
+                        for row in conn.execute(_SELECT_USER_SQL, (username,))]
+        except (sqlite3.Error, OSError, ValueError):
+            return []
+
+    def delete(self, username: str, record_id: str) -> bool:
+        """DELETE one entry, only if it belongs to `username`.
+        True if a row was removed, False if none matched or on failure."""
+        try:
+            with closing(self._connect()) as conn:
+                with conn:
+                    cursor = conn.execute(
+                        "DELETE FROM vitals WHERE record_id = ? AND username = ?",
+                        (record_id, username),
+                    )
+            return cursor.rowcount > 0
+        except (sqlite3.Error, OSError):
             return False
