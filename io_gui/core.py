@@ -416,39 +416,28 @@ def hash_pin(pin: str, salt_hex: str) -> str:
     return hashlib.pbkdf2_hmac("sha256", pin.encode("utf-8"), salt, PASSWORD_ITERATIONS).hex()
 
 def user_has_pin(username: str) -> bool:
-    account = load_accounts().get(username.strip().lower())
+    user = data_service.find_user(username)
+    account = data_service.get_account(user) if user else None
     return bool(account and account.get("pin_hash") and account.get("pin_salt"))
 
 def set_user_pin(username: str, pin: str) -> bool:
-    username_key = username.strip().lower()
-    accounts = load_accounts()
-    account = accounts.get(username_key)
-    if account is None:
+    user = data_service.find_user(username)
+    if user is None:
         return False
+    account = data_service.get_account(user)
     pin_salt = secrets.token_hex(16)
     account["pin_salt"] = pin_salt
     account["pin_hash"] = hash_pin(pin, pin_salt)
-    accounts[username_key] = account
-    try:
-        save_accounts(accounts)
-        return True
-    except OSError:
-        return False
+    return data_service.save_account(user, account)
 
 def remove_user_pin(username: str) -> bool:
-    username_key = username.strip().lower()
-    accounts = load_accounts()
-    account = accounts.get(username_key)
-    if account is None:
+    user = data_service.find_user(username)
+    if user is None:
         return False
+    account = data_service.get_account(user)
     account.pop("pin_salt", None)
     account.pop("pin_hash", None)
-    accounts[username_key] = account
-    try:
-        save_accounts(accounts)
-        return True
-    except OSError:
-        return False
+    return data_service.save_account(user, account)
 
 def authenticate_with_pin(username: str, pin: str) -> User | None:
     """The matching User if the username and PIN are correct, else None."""
