@@ -55,6 +55,7 @@ from data_layer import (
     default_medical_profile,
 )
 
+from file import ExtractedFile
 from user import User
 
 __all__ = [
@@ -186,6 +187,37 @@ class DataManager:
         accounts = self._accounts.load_all()
         accounts[user.key] = {**account, **user.to_dict()}
         return self._accounts.save_all(accounts)
+
+    def load_user(self, username: str) -> Optional[User]:
+        """The registered User, holding one ExtractedFile per saved report."""
+        user = self.find_user(username)
+        if user is None:
+            return None
+        originals = {
+            entry.get("report_id"): entry
+            for entry in self._original_reports.list_for_user(user.username)
+        }
+        for record in self._records.load_all():
+            if not isinstance(record, dict):
+                continue
+            if str(record.get("username", "")).strip().lower() != user.key:
+                continue
+            original = originals.get(record.get("report_id"))
+            source = original["stored_filename"] if original else record.get("record_id")
+            if not source:
+                continue
+            try:
+                user.add_file(ExtractedFile.from_dict({
+                    "source": source,
+                    "mime_type": original["mime_type"] if original else "application/octet-stream",
+                    "is_medical_report": True,
+                    "classification_reason": record.get("summary", ""),
+                    "date": record.get("date"),
+                    "metrics": record.get("metrics"),
+                }))
+            except ValueError:
+                continue  # same file saved twice, or an old record that fails validation
+        return user
 
     # ------------------------------------------------------------------
     # Health records
