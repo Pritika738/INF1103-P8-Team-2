@@ -19,7 +19,14 @@ from .json_store import JsonListStore
 
 
 class RecordRepository(ABC):
-    """Interface: load and save the full list of health records."""
+    """Contract: load and save the full list of records.
+
+    Subclasses must provide load_all() / save_all(). The single-record
+    operations below (add / list_for_user / delete) have working defaults
+    built on those two, so every backend supports them; a database backend
+    overrides them with direct queries instead of rewriting everything
+    (Open/Closed + Liskov: callers never need to know which one they have).
+    """
 
     @abstractmethod
     def load_all(self) -> List[dict]:
@@ -28,6 +35,28 @@ class RecordRepository(ABC):
     @abstractmethod
     def save_all(self, records: List[dict]) -> bool:
         """Replace the stored records; True on success, False if saving failed."""
+
+    def add(self, record: dict) -> bool:
+        """Append one record, keeping every existing one. True on success."""
+        records = self.load_all()
+        records.append(record)
+        return self.save_all(records)
+
+    def list_for_user(self, username: str) -> List[dict]:
+        """One user's records, in the order they were saved."""
+        return [r for r in self.load_all() if r.get("username") == username]
+
+    def delete(self, username: str, record_id: str) -> bool:
+        """Delete the record with this record_id, only if it belongs to
+        `username`. True if one was found and the save succeeded."""
+        records = self.load_all()
+        kept = [
+            r for r in records
+            if not (r.get("record_id") == record_id and r.get("username") == username)
+        ]
+        if len(kept) == len(records):
+            return False
+        return self.save_all(kept)
 
 
 class JsonRecordRepository(RecordRepository):

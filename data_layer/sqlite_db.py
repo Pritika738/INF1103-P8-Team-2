@@ -19,5 +19,11 @@ def connect(db_path: str, schema: str) -> sqlite3.Connection:
     directory = os.path.dirname(db_path) or "."
     os.makedirs(directory, exist_ok=True)
     conn = sqlite3.connect(db_path)
-    conn.executescript(schema)
+    try:
+        conn.executescript(schema)
+    except Exception:
+        # e.g. a corrupt database file: close before re-raising, otherwise
+        # the open handle keeps the file locked (on Windows) until exit.
+        conn.close()
+        raise
     return conn
