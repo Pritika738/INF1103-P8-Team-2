@@ -374,13 +374,6 @@ def hash_password(password: str, salt_hex: str) -> str:
     salt = bytes.fromhex(salt_hex)
     return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS).hex()
 
-def load_accounts() -> dict:
-    return data_service.load_accounts()
-
-def save_accounts(accounts: dict) -> None:
-    if not data_service.save_accounts(accounts):
-        raise OSError("Could not save accounts to the database.")
-
 def create_temporary_account(username: str, password: str):
     user = User(username)
     if data_service.find_user(user.username) is not None:
