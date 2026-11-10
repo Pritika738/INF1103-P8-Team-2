@@ -18,6 +18,7 @@ Run with:
 import hashlib
 import json
 import os
+import sys
 
 import pytest
 import streamlit
@@ -55,6 +56,11 @@ def dm(tmp_path, monkeypatch):
         JsonRecordRepository(str(tmp_path / "vitals.json")),
     )
     monkeypatch.setattr(data_manager.DataManager, "create", classmethod(lambda cls: manager))
+    # The GUI builds its services when core.py is first imported. Forget the
+    # GUI modules so this test's app imports them again and uses `manager`.
+    for name in list(sys.modules):
+        if name in ("core", "styles", "screens") or name.startswith("screens."):
+            monkeypatch.delitem(sys.modules, name)
     return manager
 
 
