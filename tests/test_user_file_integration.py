@@ -178,3 +178,59 @@ def test_process_file_without_measurements_is_rejected():
 def test_process_file_rejects_non_files():
     with pytest.raises(TypeError):
         LogicManager.default().process_file({"heart_rate": 72}, [])
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: register -> upload -> rebuild the User with their files
+# ---------------------------------------------------------------------------
+
+def upload(dm, user, ai, file_bytes, filename):
+    """The same manager calls show_upload() makes, without Streamlit."""
+    extracted = ai.extract_file(file_bytes, "application/pdf", filename)
+    processed = LogicManager.default().process_file(extracted, dm.load_health_records())
+    record = dict(processed, username=user.username, date=extracted.report_date)
+    original = dm.save_original_report(file_bytes, filename, "application/pdf",
+                                       record["date"], user.username)
+    record["report_id"] = original["report_id"]
+    assert dm.save_record(record)
+
+
+def test_full_workflow_user_owns_extracted_files(dm):
+    dm.save_account(User("Alice"), {"salt": "s", "password_hash": "h"})
+    alice = dm.find_user("alice")
+
+    upload(dm, alice, ai_with(extraction_json(report_date="2026-03-01"), ALL_SUPPORTED), b"march", "mar.pdf")
+    upload(dm, alice, ai_with(extraction_json(report_date="2026-01-15"), ALL_SUPPORTED), b"january", "jan.pdf")
+
+    loaded = dm.load_user("alice")
+    assert loaded == alice
+    assert loaded.file_count == 2
+    assert all(isinstance(f, ExtractedFile) for f in loaded.files)
+    assert [f.report_date for f in loaded.files_by_date()] == ["2026-01-15", "2026-03-01"]
+    assert len(loaded.medical_files()) == 2
+
+
+def test_load_user_ignores_other_users_and_duplicate_uploads(dm):
+    dm.save_account(User("alice"), {"salt": "s", "password_hash": "h"})
+    dm.save_account(User("bob"), {"salt": "s", "password_hash": "h"})
+    alice, bob = dm.find_user("alice"), dm.find_user("bob")
+
+    upload(dm, alice, ai_with(extraction_json(), ALL_SUPPORTED), b"same", "a.pdf")
+    upload(dm, alice, ai_with(extraction_json(), ALL_SUPPORTED), b"same", "a-again.pdf")
+    upload(dm, bob, ai_with(extraction_json(), ALL_SUPPORTED), b"bob", "b.pdf")
+
+    assert len(dm.load_health_records()) == 3
+    assert dm.load_user("alice").file_count == 1   # identical bytes -> one archived file
+    assert dm.load_user("bob").file_count == 1
+
+
+def test_load_user_skips_records_that_fail_validation(dm):
+    dm.save_account(User("alice"), {"salt": "s", "password_hash": "h"})
+    dm.save_record({"username": "alice", "date": "not-a-date", "metrics": {"heart_rate": 70}})
+    dm.save_record({"username": "alice", "date": "2026-01-01", "metrics": {"heart_rate": -1}})
+    dm.save_record({"username": "alice", "date": "2026-01-01", "metrics": {"heart_rate": 70}})
+    assert dm.load_user("alice").file_count == 1
+
+
+def test_load_user_unknown_returns_none(dm):
+    assert dm.load_user("ghost") is None
