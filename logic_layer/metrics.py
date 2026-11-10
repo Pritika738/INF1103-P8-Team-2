@@ -75,15 +75,36 @@ class MetricSpec(ABC):
         """True if a single current reading alone is urgent."""
         return value is not None and value >= self._urgent_at
 
+    @abstractmethod
+    def higher_is_worse(self) -> bool:
+        """
+        Whether a rising reading is the *worsening* direction for this
+        metric. Abstract so MetricSpec itself cannot be instantiated -
+        every concrete metric must declare its own polarity. All four
+        metrics tracked today are 'higher is worse', but a future metric
+        (e.g. one where low readings are the concern) declares the
+        opposite here without touching is_improvement() below (LSP/OCP).
+        """
+        raise NotImplementedError
+
     def is_improvement(self, delta: float) -> bool:
-        """For 'higher is worse' metrics a decrease improves. Overridable (LSP)."""
-        return delta < 0
+        """
+        True if a change (current - previous) is an improvement, decided
+        from this metric's own polarity rather than a hardcoded
+        assumption. For a 'higher is worse' metric a decrease improves.
+        """
+        return delta < 0 if self.higher_is_worse() else delta > 0
+
+
 class HeartRate(MetricSpec):
     def __init__(self):
         super().__init__(
             key="heart_rate", label="Heart Rate", unit="bpm",
             urgent_at=130, flag_above=100, tolerance=5,
         )
+
+    def higher_is_worse(self) -> bool:
+        return True
 
 
 class SystolicBloodPressure(MetricSpec):
@@ -93,6 +114,9 @@ class SystolicBloodPressure(MetricSpec):
             unit="mmHg", urgent_at=180, flag_above=130, tolerance=5,
         )
 
+    def higher_is_worse(self) -> bool:
+        return True
+
 
 class DiastolicBloodPressure(MetricSpec):
     def __init__(self):
@@ -101,6 +125,9 @@ class DiastolicBloodPressure(MetricSpec):
             unit="mmHg", urgent_at=120, flag_above=80, tolerance=4,
         )
 
+    def higher_is_worse(self) -> bool:
+        return True
+
 
 class BloodGlucose(MetricSpec):
     def __init__(self):
@@ -108,3 +135,6 @@ class BloodGlucose(MetricSpec):
             key="blood_glucose", label="Blood Glucose", unit="mmol/L",
             urgent_at=13.9, flag_above=7.0, tolerance=0.5,
         )
+
+    def higher_is_worse(self) -> bool:
+        return True

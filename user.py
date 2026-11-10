@@ -23,7 +23,7 @@ class User:
 
     @property
     def key(self) -> str:
-        """Lowercase username, matching how accounts are keyed in users.json."""
+        """Lowercase username: the key the DataManager stores this user's account under."""
         return self.__username.lower()
 
     # ------------------------------------------------------------------
