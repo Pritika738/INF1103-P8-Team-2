@@ -179,9 +179,9 @@ sequenceDiagram
 
 **SQLite database integration is the Phase 2 advanced feature.**
 
-The primary database is `data/app.db`, which stores application data such as health records, user accounts and report metadata.
+The primary database is `data/app.db`, which stores all application data: health records, user accounts, self-logged vitals, medical profiles and the metadata for every uploaded report and generated PDF.
 
-The application also uses file-based storage for uploaded medical reports, generated PDFs, medical profiles and self-logged vitals.
+Only the files themselves (uploaded medical reports and generated PDFs) are kept on disk, in the `data/` folders.
 
 Key storage components include:
 
@@ -190,9 +190,9 @@ Key storage components include:
 - `SqliteListStore` — SQLite-backed metadata collections.
 - `OriginalReportArchive` — uploaded report files and associated metadata.
 - `ConsultationPdfArchive` — consultation PDF files and metadata.
-- `MedicalProfileStore` — user medical profiles.
+- `SqliteMedicalProfileStore` — user medical profiles (one row per user).
 - `MedicalProfilePdfArchive` — generated Medical Profile PDFs.
-- A separate repository for manually logged vital-sign entries.
+- `SqliteVitalsRepository` — manually logged vital-sign entries.
 
 Repository abstractions separate business logic from persistence implementation.
 

@@ -40,6 +40,8 @@ MEDICAL_PROFILE_PDF_DIR = os.path.join(DATA_DIR, "medical_profile_pdfs")
 # table of DATABASE_FILE; the JSON file is kept only as the migration source.
 ORIGINAL_REPORTS_DIR = os.path.join(DATA_DIR, "original_reports")
 ORIGINAL_REPORTS_FILE = os.path.join(DATA_DIR, "original_reports.json")
+# Medical profiles now live in the "medical_profiles" table of
+# DATABASE_FILE; this JSON file is kept only as the migration source.
 MEDICAL_PROFILES_FILE = os.path.join(DATA_DIR, "medical_profiles.json")
 
 # Vitals the user measured themselves at home (e.g. a daily blood

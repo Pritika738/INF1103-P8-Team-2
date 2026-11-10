@@ -8,6 +8,7 @@ One-off migration: copy the old JSON files into the SQLite database
     data/consultation_summaries.json -> consultation_summaries table
     data/original_reports.json       -> original_reports table
     data/manual_vitals.json          -> vitals table
+    data/medical_profiles.json       -> medical_profiles table
 
 Only metadata moves; the PDF / image files themselves stay where they are
 in data/consultation_pdfs/ and data/original_reports/.
@@ -26,11 +27,12 @@ import sys
 
 from config import (
     CONSULTATION_SUMMARIES_FILE, DATABASE_FILE, HEALTH_RECORDS_FILE,
-    MANUAL_VITALS_FILE, ORIGINAL_REPORTS_FILE, USERS_FILE,
+    MANUAL_VITALS_FILE, MEDICAL_PROFILES_FILE, ORIGINAL_REPORTS_FILE, USERS_FILE,
 )
 from data_layer import (
-    JsonAccountRepository, JsonListStore, JsonRecordRepository,
-    SqliteAccountRepository, SqliteRecordRepository, SqliteVitalsRepository,
+    JsonAccountRepository, JsonListStore, JsonRecordRepository, MedicalProfileStore,
+    SqliteAccountRepository, SqliteMedicalProfileStore, SqliteRecordRepository,
+    SqliteVitalsRepository,
     consultation_summaries_table, original_reports_table,
 )
 
@@ -71,6 +73,7 @@ def migrate() -> int:
     summaries_src, summaries_db = JsonListStore(CONSULTATION_SUMMARIES_FILE), consultation_summaries_table(DATABASE_FILE)
     reports_src, reports_db = JsonListStore(ORIGINAL_REPORTS_FILE), original_reports_table(DATABASE_FILE)
     vitals_src, vitals_db = JsonRecordRepository(MANUAL_VITALS_FILE), SqliteVitalsRepository(DATABASE_FILE)
+    profiles_src, profiles_db = MedicalProfileStore(MEDICAL_PROFILES_FILE), SqliteMedicalProfileStore(DATABASE_FILE)
 
     jobs = [
         ("health_records", HEALTH_RECORDS_FILE, records_src.load_all, records_db.load_all, records_db.save_all),
@@ -78,6 +81,7 @@ def migrate() -> int:
         ("consultation_summaries", CONSULTATION_SUMMARIES_FILE, summaries_src.load, summaries_db.load, summaries_db.save),
         ("original_reports", ORIGINAL_REPORTS_FILE, reports_src.load, reports_db.load, reports_db.save),
         ("vitals", MANUAL_VITALS_FILE, vitals_src.load_all, vitals_db.load_all, vitals_db.save_all),
+        ("medical_profiles", MEDICAL_PROFILES_FILE, profiles_src.load_all, profiles_db.load_all, profiles_db.save_all),
     ]
     ok = all([migrate_one(*job) for job in jobs])
     return 0 if ok else 1

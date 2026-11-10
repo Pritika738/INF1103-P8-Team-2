@@ -47,11 +47,13 @@ from data_layer import (
     ConsultationPdfArchive,
     JsonRecordRepository,
     MedicalProfilePdfArchive,
+    MedicalProfileRepository,
     MedicalProfileStore,
     OriginalReportArchive,
     RecordRepository,
     SqliteAccountRepository,
     SqliteRecordRepository,
+    SqliteMedicalProfileStore,
     SqliteVitalsRepository,
     default_medical_profile,
 )
@@ -63,6 +65,7 @@ __all__ = [
     "DataManager", "RecordRepository", "JsonRecordRepository", "SqliteRecordRepository",
     "ConsultationPdfArchive", "OriginalReportArchive", "MedicalProfileStore",
     "AccountRepository", "SqliteAccountRepository", "SqliteVitalsRepository",
+    "MedicalProfileRepository", "SqliteMedicalProfileStore",
 ]
 
 
@@ -72,7 +75,7 @@ class DataManager:
     def __init__(self, records: RecordRepository,
                  consultation_pdfs: ConsultationPdfArchive,
                  original_reports: OriginalReportArchive,
-                 medical_profiles: MedicalProfileStore,
+                 medical_profiles: MedicalProfileRepository,
                  accounts: AccountRepository,
                  manual_vitals: Optional[RecordRepository] = None,
                  medical_profile_pdfs: Optional[MedicalProfilePdfArchive] = None):
@@ -102,7 +105,7 @@ class DataManager:
             SqliteRecordRepository(),
             ConsultationPdfArchive(),
             OriginalReportArchive(),
-            MedicalProfileStore(),
+            SqliteMedicalProfileStore(),
             SqliteAccountRepository(),
             SqliteVitalsRepository(),
             MedicalProfilePdfArchive(),
