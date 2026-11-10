@@ -1,36 +1,12 @@
-﻿import streamlit as st
-import json
-import os
-import re
-import sys
-import calendar
-import hashlib
-import hmac
-import secrets
-from pathlib import Path
-from datetime import datetime, date, timedelta
+﻿"""
+io_gui.py
 
-import pandas as pd
-import altair as alt
+PASSAY entry point. Sets the Streamlit page config, injects CSS, then
+routes to the right screen based on st.session_state.page. All the
+real work lives in styles.py, core.py and the screens/ package.
+"""
 
-# This file lives in io_gui/, one directory below the four manager
-# modules (io_manager.py, ai_manager.py, logic_manager.py, data_manager.py).
-# Streamlit inserts this file's own directory into sys.path, not the
-# project root, so "import io_manager" etc. would fail without this.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-import io_manager
-import logic_manager
-import data_manager
-import ai_manager
-
-# One AIManager for the whole app. The real Gemini client is injected
-# here, so everything below depends only on the AIClient interface.
-ai_service = ai_manager.AIManager(ai_manager.GeminiClient())
-
-# One DataManager for the whole app. It reads and writes the real files
-# configured in config.py; tests build their own with temporary files.
-data_service = data_manager.DataManager.create()
+import streamlit as st
 
 st.set_page_config(
     page_title="PASSAY - Health History and Consultation Prep",
@@ -39,388 +15,19 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-def inject_css():
-    st.markdown(
-        """
-        <style>
-        @import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@500;600;700&family=Baloo+2:wght@500;600;700;800&display=swap');
+from styles import inject_css
+import core  # noqa: F401
+from screens import (
+    sidebar_nav, show_login, show_pin_login, show_register,
+    show_dashboard, show_upload, show_history, show_trends,
+    show_vitals, show_consultation, show_profile, show_settings,
+)
 
-        html, body, [class*="css"] {
-            font-family: 'Quicksand', sans-serif;
-            font-weight: 600;
-        }
-        .stApp p,
-        .stApp label,
-        .stApp input,
-        .stApp textarea,
-        .stApp button,
-        .stApp li,
-        .stApp [data-testid="stMarkdownContainer"] {
-            font-family: 'Quicksand', sans-serif;
-        }
-        [data-testid="stIconMaterial"],
-        .material-symbols-rounded,
-        .material-symbols-outlined {
-            font-family: "Material Symbols Rounded" !important;
-            font-weight: normal !important;
-            font-style: normal !important;
-            letter-spacing: normal !important;
-            text-transform: none !important;
-            white-space: nowrap !important;
-            word-wrap: normal !important;
-            direction: ltr !important;
-            -webkit-font-feature-settings: "liga" !important;
-            font-feature-settings: "liga" !important;
-            -webkit-font-smoothing: antialiased !important;
-        }
-        h1,h2,h3,h4 { font-family: 'Baloo 2', cursive !important; letter-spacing: 0 !important; }
+inject_css()
 
-        @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes springIn {
-            0% { opacity: 0; transform: translateY(24px) scale(0.94); }
-            60% { opacity: 1; transform: translateY(-4px) scale(1.01); }
-            100% { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        @keyframes slideInLeft { from { opacity: 0; transform: translateX(-18px); } to { opacity: 1; transform: translateX(0); } }
-        @keyframes floaty { 0% { transform: translate(0,0) scale(1); } 50% { transform: translate(40px,-30px) scale(1.12); } 100% { transform: translate(0,0) scale(1); } }
-        @keyframes floaty2 { 0% { transform: translate(0,0) scale(1); } 50% { transform: translate(-34px,30px) scale(1.1); } 100% { transform: translate(0,0) scale(1); } }
-        @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
-
-        /* ============================================================
-           THEME TOKENS
-           Defaults below are the DARK theme. The light-mode overrides
-           further down flip these tokens when the user's Streamlit
-           base theme is light (prefers-color-scheme: light).
-           ============================================================ */
-        :root {
-            --app-bg-1: #2a1958;
-            --app-bg-2: #10344a;
-            --app-bg-3a: #0a0e1e;
-            --app-bg-3b: #0e1226;
-            --blob-1: rgba(167,139,250,0.5);
-            --blob-2: rgba(94,234,212,0.4);
-
-            --text-main: #cdd6ee;
-            --text-strong: #f4f6ff;
-            --text-muted: #a6b0d0;
-
-            --surface: rgba(255,255,255,0.05);
-            --surface-2: rgba(255,255,255,0.06);
-            --border: rgba(255,255,255,0.12);
-            --border-soft: rgba(255,255,255,0.09);
-            --border-strong: rgba(255,255,255,0.14);
-            --shadow: rgba(0,0,0,0.4);
-            --shadow-soft: rgba(0,0,0,0.36);
-
-            --input-bg: rgba(255,255,255,0.05);
-            --input-border: rgba(255,255,255,0.14);
-
-            --sidebar-bg: linear-gradient(180deg, #120a2e 0%, #131a38 60%, #16224a 130%);
-            --sidebar-border: rgba(255,255,255,0.06);
-
-            --accent: #a78bfa;
-            --accent-2: #5eead4;
-            --accent-ring: rgba(167,139,250,0.22);
-            --accent-glow: rgba(167,139,250,0.3);
-
-            --hero-grad: linear-gradient(115deg,#2a1958 0%,#6d28d9 50%,#0e7490 120%);
-            --hero-shadow: rgba(109,40,217,0.42);
-            --on-hero: #ffffff;
-            --on-hero-soft: rgba(255,255,255,0.9);
-
-            --metric-bg: rgba(255,255,255,0.05);
-        }
-
-        .stApp {
-            background:
-              radial-gradient(1000px 600px at 8% -5%, var(--app-bg-1) 0%, transparent 55%),
-              radial-gradient(900px 600px at 100% 0%, var(--app-bg-2) 0%, transparent 55%),
-              linear-gradient(180deg, var(--app-bg-3a) 0%, var(--app-bg-3b) 100%);
-            overflow-x: hidden;
-        }
-        .stApp:before, .stApp:after {
-            content: ""; position: fixed; border-radius: 50%; filter: blur(90px); z-index: 0; pointer-events: none;
-        }
-        .stApp:before {
-            width: 560px; height: 560px;
-            background: radial-gradient(circle at 30% 30%, var(--blob-1), transparent 70%);
-            top: -140px; left: -100px; animation: floaty 18s ease-in-out infinite;
-        }
-        .stApp:after {
-            width: 500px; height: 500px;
-            background: radial-gradient(circle at 60% 40%, var(--blob-2), transparent 70%);
-            bottom: -160px; right: -80px; animation: floaty2 22s ease-in-out infinite;
-        }
-        section.main .block-container { position: relative; z-index: 1; }
-
-        section.main .block-container > div { animation: springIn 0.55s cubic-bezier(0.34,1.56,0.64,1) both; }
-        section.main .block-container > div:nth-child(1) { animation-delay: 0.02s; }
-        section.main .block-container > div:nth-child(2) { animation-delay: 0.10s; }
-        section.main .block-container > div:nth-child(3) { animation-delay: 0.18s; }
-        section.main .block-container > div:nth-child(4) { animation-delay: 0.26s; }
-        section.main .block-container > div:nth-child(5) { animation-delay: 0.34s; }
-        section.main .block-container > div:nth-child(6) { animation-delay: 0.42s; }
-        section.main .block-container > div:nth-child(7) { animation-delay: 0.50s; }
-        section.main .block-container > div:nth-child(n+8) { animation-delay: 0.58s; }
-
-        div[data-testid="stMetric"] { animation: springIn 0.6s cubic-bezier(0.34,1.56,0.64,1) both; }
-        section[data-testid="stSidebar"] .stButton { animation: slideInLeft 0.4s ease both; }
-
-        #MainMenu, footer {
-            visibility: hidden;
-        }
-
-        [data-testid="stStatusWidget"],
-        [data-testid="stDecoration"] {
-            display: none !important;
-        }
-
-        /* Toolbar must stay alive because it contains the sidebar reopen button */
-        [data-testid="stToolbar"] {
-            display: flex !important;
-            visibility: visible !important;
-        }
-
-        /* Sidebar reopen button */
-        [data-testid="stExpandSidebarButton"] {
-            display: flex !important;
-            visibility: visible !important;
-            opacity: 1 !important;
-            pointer-events: auto !important;
-        }
-
-        .block-container { padding-top: 2rem; max-width: 1150px; }
-
-        .stApp, .stApp p, .stApp span, .stApp label, .stApp li,
-        .main .block-container { color: var(--text-main) !important; }
-        .stApp h1, .stApp h2, .stApp h3, .stApp h4 { color: var(--text-strong) !important; font-weight: 700 !important; }
-
-        .stTextInput input, .stNumberInput input, .stDateInput input,
-        div[data-baseweb="input"] input, textarea, div[data-baseweb="select"] > div {
-            background-color: var(--input-bg) !important;
-            color: var(--text-strong) !important;
-            border: 1.5px solid var(--input-border) !important;
-            border-radius: 16px !important;
-            transition: border-color 0.25s ease, box-shadow 0.25s ease !important;
-        }
-        .stTextInput input:focus, div[data-baseweb="input"]:focus-within {
-            border-color: var(--accent) !important;
-            box-shadow: 0 0 0 4px var(--accent-ring) !important;
-        }
-        .stTextInput label, .stSelectbox label, .stNumberInput label {
-            color: var(--text-muted) !important; font-weight: 700 !important; font-size: 0.82rem !important;
-        }
-
-        div[data-testid="stVerticalBlockBorderWrapper"] {
-            background: var(--surface) !important;
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1.5px solid var(--border) !important;
-            border-radius: 26px !important;
-            box-shadow: 0 16px 50px var(--shadow) !important;
-            transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.3s ease, border-color 0.3s ease;
-        }
-        div[data-testid="stVerticalBlockBorderWrapper"]:hover {
-            transform: translateY(-6px);
-            border-color: rgba(167,139,250,0.5) !important;
-            box-shadow: 0 28px 62px rgba(167,139,250,0.24) !important;
-        }
-
-        section[data-testid="stSidebar"] {
-            background: var(--sidebar-bg);
-            border-right: 1px solid var(--sidebar-border);
-        }
-        section[data-testid="stSidebar"] * { color: var(--text-main) !important; }
-        section[data-testid="stSidebar"] .stButton > button {
-            background: var(--surface);
-            border: 1.5px solid var(--border-soft);
-            color: var(--text-strong) !important;
-            border-radius: 16px;
-            text-align: left;
-            font-weight: 700;
-            padding: 0.65rem 0.95rem;
-            transition: all 0.25s cubic-bezier(0.34,1.56,0.64,1);
-        }
-        section[data-testid="stSidebar"] .stButton > button:hover {
-            background: rgba(167,139,250,0.2);
-            border-color: rgba(167,139,250,0.55);
-            transform: translateX(6px) scale(1.02);
-            box-shadow: 0 0 20px var(--accent-glow);
-        }
-
-        .stButton > button {
-            border-radius: 16px;
-            border: 1.5px solid var(--border-strong);
-            padding: 0.6rem 1.15rem;
-            font-weight: 700;
-            background: var(--surface-2);
-            color: var(--text-strong) !important;
-            transition: all 0.25s cubic-bezier(0.34,1.56,0.64,1);
-        }
-        .stButton > button:hover {
-            border-color: var(--accent);
-            color: var(--text-strong) !important;
-            transform: translateY(-2px) scale(1.02);
-            box-shadow: 0 12px 28px rgba(167,139,250,0.34);
-        }
-        button[kind="primary"] {
-            background: linear-gradient(100deg,#a78bfa,#8b5cf6 45%,#5eead4) !important;
-            border: none !important;
-            color: #17123a !important;
-            box-shadow: 0 12px 30px rgba(167,139,250,0.5) !important;
-            background-size: 200% 100% !important;
-            transition: background-position 0.5s ease, transform 0.25s ease, box-shadow 0.25s ease !important;
-            font-weight: 800 !important;
-        }
-        button[kind="primary"]:hover {
-            transform: translateY(-2px) scale(1.02);
-            background-position: 100% 0 !important;
-            box-shadow: 0 18px 42px rgba(167,139,250,0.65) !important;
-        }
-
-        div[data-testid="stMetric"] {
-            background: var(--metric-bg);
-            border: 1.5px solid var(--border);
-            border-radius: 24px;
-            padding: 18px 20px;
-            box-shadow: 0 14px 40px var(--shadow-soft);
-            transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.3s ease, border-color 0.3s ease;
-        }
-        div[data-testid="stMetric"]:hover {
-            transform: translateY(-6px) scale(1.02);
-            border-color: rgba(167,139,250,0.5);
-            box-shadow: 0 24px 54px rgba(167,139,250,0.26);
-        }
-        div[data-testid="stMetricValue"] { color: var(--text-strong) !important; font-weight: 800; font-family: 'Baloo 2'; }
-        div[data-testid="stMetricLabel"] { color: var(--text-muted) !important; font-weight: 700; }
-
-        hr { margin: 1rem 0; border: none; border-top: 1px solid var(--border-soft); }
-        div[data-testid="stDataFrame"] { border-radius: 18px; overflow: hidden; box-shadow: 0 8px 26px var(--shadow-soft); }
-
-        .vt-hero { animation: springIn 0.6s cubic-bezier(0.34,1.56,0.64,1) both; }
-        .vt-badge { animation: fadeIn 0.7s ease both; }
-        .vt-bob { display:inline-block; animation: bob 3s ease-in-out infinite; }
-        /* Keep Streamlit header available for sidebar controls */
-        [data-testid="stHeader"] {
-            display: block !important;
-            visibility: visible !important;
-            background: transparent !important;
-        }
-
-        /* Keep sidebar collapse/reopen controls visible */
-        [data-testid="stSidebarCollapseButton"],
-        [data-testid="collapsedControl"] {
-            display: flex !important;
-            visibility: visible !important;
-            opacity: 1 !important;
-            pointer-events: auto !important;
-        }
-
-        /* ============================================================
-           LIGHT MODE OVERRIDES
-           When the user's Streamlit base theme is "light", Streamlit
-           sets the OS/app colour scheme so prefers-color-scheme: light
-           matches. We re-map every theme token to a bright palette
-           that keeps the same purple/teal brand identity but on a
-           soft, readable light background.
-           ============================================================ */
-        @media (prefers-color-scheme: light) {
-            :root {
-                --app-bg-1: #ede9fe;
-                --app-bg-2: #cffafe;
-                --app-bg-3a: #f7f8ff;
-                --app-bg-3b: #eef1fb;
-                --blob-1: rgba(167,139,250,0.35);
-                --blob-2: rgba(45,212,191,0.28);
-
-                --text-main: #3b3f58;
-                --text-strong: #1e2140;
-                --text-muted: #6b7290;
-
-                --surface: rgba(255,255,255,0.75);
-                --surface-2: rgba(255,255,255,0.85);
-                --border: rgba(30,33,64,0.10);
-                --border-soft: rgba(30,33,64,0.08);
-                --border-strong: rgba(30,33,64,0.12);
-                --shadow: rgba(79,70,139,0.14);
-                --shadow-soft: rgba(79,70,139,0.12);
-
-                --input-bg: rgba(255,255,255,0.9);
-                --input-border: rgba(30,33,64,0.14);
-
-                --sidebar-bg: linear-gradient(180deg, #f3eefe 0%, #eaf0fb 60%, #e4f3f6 130%);
-                --sidebar-border: rgba(30,33,64,0.08);
-
-                --accent: #7c3aed;
-                --accent-2: #0d9488;
-                --accent-ring: rgba(124,58,237,0.18);
-                --accent-glow: rgba(124,58,237,0.22);
-
-                --hero-grad: linear-gradient(115deg,#8b5cf6 0%,#7c3aed 50%,#0e7490 120%);
-                --hero-shadow: rgba(124,58,237,0.28);
-                --on-hero: #ffffff;
-                --on-hero-soft: rgba(255,255,255,0.92);
-
-                --metric-bg: rgba(255,255,255,0.8);
-            }
-
-            /* Card hover accents read better slightly stronger on light */
-            div[data-testid="stVerticalBlockBorderWrapper"]:hover {
-                border-color: rgba(124,58,237,0.5) !important;
-                box-shadow: 0 28px 62px rgba(124,58,237,0.18) !important;
-            }
-            section[data-testid="stSidebar"] .stButton > button:hover {
-                background: rgba(124,58,237,0.12);
-                border-color: rgba(124,58,237,0.4);
-            }
-            .stButton > button:hover {
-                box-shadow: 0 12px 28px rgba(124,58,237,0.22);
-            }
-            div[data-testid="stMetric"]:hover {
-                border-color: rgba(124,58,237,0.45);
-                box-shadow: 0 24px 54px rgba(124,58,237,0.18);
-            }
-            /* Primary button text stays dark on the bright gradient */
-            button[kind="primary"] { color: #1e1240 !important; }
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-def hero(title, subtitle=""):
-    sub = ""
-    if subtitle:
-        sub = ("<div style='color:var(--on-hero-soft);font-size:1.05rem;margin-top:6px;"
-               "font-weight:600;'>" + subtitle + "</div>")
-    st.markdown(
-        "<div class='vt-hero' style='background:var(--hero-grad);"
-        "padding:34px 38px;border-radius:32px;margin-bottom:24px;"
-        "box-shadow:0 24px 60px var(--hero-shadow);position:relative;overflow:hidden;"
-        "border:1.5px solid rgba(255,255,255,0.14);'>"
-        "<div style='position:absolute;right:-30px;top:-30px;width:200px;height:200px;"
-        "background:rgba(255,255,255,0.12);border-radius:50%;'></div>"
-        "<div style='position:absolute;right:100px;bottom:-70px;width:140px;height:140px;"
-        "background:rgba(94,234,212,0.22);border-radius:50%;'></div>"
-        "<div style='color:var(--on-hero);font-size:2.1rem;font-weight:800;font-family:Baloo 2;position:relative;'>"
-        + title + "</div>" + sub + "</div>",
-        unsafe_allow_html=True,
-    )
-
-def stat_tile(label, value, color):
-    st.markdown(
-        "<div style='background:var(--surface);border:1.5px solid var(--border);"
-        "border-radius:24px;padding:20px 22px;box-shadow:0 14px 40px var(--shadow-soft);"
-        "position:relative;overflow:hidden;'>"
-        "<div style='position:absolute;right:-16px;top:-16px;width:74px;height:74px;"
-        "border-radius:50%;background:" + color + "40;filter:blur(4px);'></div>"
-        "<div style='font-size:2.1rem;font-weight:800;color:var(--text-strong);line-height:1;font-family:Baloo 2;'>"
-        + str(value) + "</div>"
-        "<div style='color:var(--text-muted);font-size:0.85rem;font-weight:700;margin-top:8px;'>" + label + "</div></div>",
-        unsafe_allow_html=True,
-    )
-
+# Every new browser session starts on the login page. This must run on
+# every script run: core.py is imported only once per server process, so
+# a default set there would only reach the very first session.
 if "page" not in st.session_state:
     st.session_state.page = "login"
 
@@ -3677,11 +3284,6 @@ def show_consultation():
     if latest_processed_record:
         with st.spinner("Preparing your consultation summary..."):
             ai_narrative = ai_service.generate_narrative(latest_processed_record)
-            # Enforce the "never diagnose/prescribe" safety rule on the
-            # AI-written narrative before it is ever shown. The guardrail
-            # lives on (and is owned by) the Logic Manager; this is the
-            # point where it is actually applied.
-            ai_narrative = logic_manager.apply_safety_guardrail(ai_narrative)
 
     report = build_report(
         who,
@@ -4014,22 +3616,14 @@ inject_css()
 
 if st.session_state.page in ("login", "register", "pin_login"):
 
-    # Create the sidebar from the beginning so Streamlit
-    # remembers its initial expanded state.
     with st.sidebar:
         st.markdown("")
 
-    # Hide the sidebar while the user is on Login/Register/PIN login.
     st.markdown(
         """
         <style>
-        section[data-testid="stSidebar"] {
-            display: none !important;
-        }
-
-        [data-testid="stExpandSidebarButton"] {
-            display: none !important;
-        }
+        section[data-testid="stSidebar"] { display: none !important; }
+        [data-testid="stExpandSidebarButton"] { display: none !important; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -4048,27 +3642,19 @@ else:
 
     if st.session_state.page == "dashboard":
         show_dashboard()
-
     elif st.session_state.page == "upload":
         show_upload()
-
     elif st.session_state.page == "history":
         show_history()
-
     elif st.session_state.page == "trends":
         show_trends()
-
     elif st.session_state.page == "vitals":
         show_vitals()
-
     elif st.session_state.page == "consultation":
         show_consultation()
-
     elif st.session_state.page == "profile":
         show_profile()
-
-    elif st.session_state.page == "settings":    # ← ADD THIS
-        show_settings() 
-                                  # ← ADD THIS
+    elif st.session_state.page == "settings":
+        show_settings()
     else:
         show_dashboard()
