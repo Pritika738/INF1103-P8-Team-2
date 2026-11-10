@@ -33,6 +33,9 @@ ai_service = ai_manager.AIManager(ai_manager.GeminiClient())
 # configured in config.py; tests build their own with temporary files.
 data_service = data_manager.DataManager.create()
 
+# One LogicManager for the whole app's report pipeline.
+logic_service = logic_manager.LogicManager.default()
+
 st.set_page_config(
     page_title="PASSAY - Health History and Consultation Prep",
     page_icon="🩺",
@@ -2775,12 +2778,13 @@ def show_upload():
 
                     with st.spinner("Sending report to the AI Manager..."):
 
-                        ai_extracted = ai_service.extract_report(
+                        extracted_file = ai_service.extract_file(
                             first_page["bytes"],
-                            first_page["mime_type"]
+                            first_page["mime_type"],
+                            first_page["name"]
                         )
 
-                        if ai_extracted is None:
+                        if extracted_file is None:
 
                             st.error(
                                 "AI analysis could not complete successfully. "
@@ -2795,8 +2799,8 @@ def show_upload():
                             all_records
                         )
 
-                        processed_record = logic_manager.process_ai_record(
-                            ai_extracted,
+                        processed_record = logic_service.process_file(
+                            extracted_file,
                             user_records
                         )
 
