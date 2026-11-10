@@ -41,17 +41,6 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from config import LATEST_REPORTS_LIMIT, MANUAL_VITALS_FILE
-from data_layer import (
-    AccountRepository,
-    ConsultationPdfArchive,
-    JsonRecordRepository,
-    MedicalProfileStore,
-    OriginalReportArchive,
-    RecordRepository,
-    SqliteAccountRepository,
-    SqliteRecordRepository,
-    default_medical_profile,
-)
 
 from data_layer import (
     AccountRepository,
@@ -65,6 +54,9 @@ from data_layer import (
     SqliteRecordRepository,
     default_medical_profile,
 )
+
+from file import ExtractedFile
+from user import User
 
 __all__ = [
     "DataManager", "RecordRepository", "JsonRecordRepository", "SqliteRecordRepository",
@@ -170,6 +162,62 @@ class DataManager:
     def save_accounts(self, accounts: Dict[str, dict]) -> bool:
         """Replace the stored accounts. Returns True on success, False if the write failed."""
         return self._accounts.save_all(accounts)
+
+    def find_user(self, username: str) -> Optional[User]:
+        """The registered User with this username (any letter case), or None."""
+        try:
+            key = User(username).key
+        except ValueError:  # a blank username can never match an account
+            return None
+        account = self._accounts.load_all().get(key)
+        return User.from_dict(account) if account else None
+
+    def get_account(self, user: User) -> Optional[dict]:
+        """A copy of this user's stored account (password/PIN hashes), or None."""
+        if not isinstance(user, User):
+            raise TypeError("get_account expects a User object.")
+        account = self._accounts.load_all().get(user.key)
+        return dict(account) if account else None
+
+    def save_account(self, user: User, account: dict) -> bool:
+        """Insert or replace ONE user's account, leaving every other account
+        untouched. The stored username always comes from the User object."""
+        if not isinstance(user, User):
+            raise TypeError("save_account expects a User object.")
+        accounts = self._accounts.load_all()
+        accounts[user.key] = {**account, **user.to_dict()}
+        return self._accounts.save_all(accounts)
+
+    def load_user(self, username: str) -> Optional[User]:
+        """The registered User, holding one ExtractedFile per saved report."""
+        user = self.find_user(username)
+        if user is None:
+            return None
+        originals = {
+            entry.get("report_id"): entry
+            for entry in self._original_reports.list_for_user(user.username)
+        }
+        for record in self._records.load_all():
+            if not isinstance(record, dict):
+                continue
+            if str(record.get("username", "")).strip().lower() != user.key:
+                continue
+            original = originals.get(record.get("report_id"))
+            source = original["stored_filename"] if original else record.get("record_id")
+            if not source:
+                continue
+            try:
+                user.add_file(ExtractedFile.from_dict({
+                    "source": source,
+                    "mime_type": original["mime_type"] if original else "application/octet-stream",
+                    "is_medical_report": True,
+                    "classification_reason": record.get("summary", ""),
+                    "date": record.get("date"),
+                    "metrics": record.get("metrics"),
+                }))
+            except ValueError:
+                continue  # same file saved twice, or an old record that fails validation
+        return user
 
     # ------------------------------------------------------------------
     # Health records

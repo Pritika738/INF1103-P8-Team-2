@@ -90,6 +90,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
+from file import ExtractedFile
+
 from logic_layer import (
     Tier, Decision,
     Finding,
@@ -174,6 +176,25 @@ class LogicManager:
             rules.append(PersistentTrendRule(spec))
             rules.append(RecentChangeRule(spec))
         return cls(rules)
+
+    # ----- safety -------------------------------------------------------
+    def apply_safety_guardrail(self, ai_text: Optional[str]) -> Optional[str]:
+        """
+        Pass any free-text AI explanation (e.g. the consultation
+        narrative Gemini writes) through this manager's SafetyGuardrail
+        before it is shown to a user. If the text contains prohibited
+        diagnostic/prescriptive language it is replaced with a safe
+        override message; otherwise it is returned unchanged. None/empty
+        is passed through so the caller can still fall back to the
+        deterministic, rule-based summary.
+
+        This is the single point where the guardrail the manager owns is
+        actually applied, so the "never diagnose" rule is enforced on
+        AI-generated text rather than merely available.
+        """
+        if not ai_text:
+            return ai_text
+        return self._guardrail.enforce(ai_text)
 # ----- shape helpers (same behaviour as the old module functions) -----
     @staticmethod
     def _flatten_ai_metrics(ai_extracted: Optional[Dict[str, Any]]) -> Dict[str, Optional[float]]:
@@ -293,51 +314,78 @@ class LogicManager:
         """
         # Deterministic acceptance rule: AI already classified the doc.
         if isinstance(ai_extracted, dict) and ai_extracted.get("is_medical_report") is False:
-            reason = ai_extracted.get("classification_reason") or (
-                "The uploaded file does not appear to be a medical report."
-            )
-            return {
-                "metrics": self._flatten_ai_metrics(None),
-                "ai_extracted_date": None,
-                "urgent_findings": [],
-                "flagged_trends": [],
-                "recent_changes": [],
-                "risk_score": 0,
-                "decision": Decision.NOT_MEDICAL_REPORT.value,
-                "recommended_action": (
-                    "The uploaded file does not appear to be a medical "
-                    "report. Please upload a valid medical report "
-                    "containing health-related examination or test "
-                    "information."
-                ),
-                "requires_doctor_review": False,
-                "summary": reason,
-            }
+            return self._not_medical_result(ai_extracted.get("classification_reason"))
 
         current_metrics = self._flatten_ai_metrics(ai_extracted)
         ai_extracted_date = self._extract_report_date(ai_extracted)
 
         if all(value is None for value in current_metrics.values()):
-            return {
-                "metrics": current_metrics,
-                "ai_extracted_date": ai_extracted_date,
-                "urgent_findings": [],
-                "flagged_trends": [],
-                "recent_changes": [],
-                "risk_score": 0,
-                "decision": Decision.REJECTED.value,
-                "recommended_action": (
-                    "No reliable measurements could be extracted from this "
-                    "report. Please try uploading a clearer copy."
-                ),
-                "requires_doctor_review": False,
-                "summary": (
-                    "No usable measurements were extracted from this report."
-                ),
-            }
+            return self._rejected_result(current_metrics, ai_extracted_date)
 
         findings = self.evaluate(current_metrics, historical_records)
         return self._finalise(current_metrics, ai_extracted_date, findings)
+
+    def process_file(self, extracted_file: ExtractedFile,
+                     historical_records: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """process() for an already-validated ExtractedFile.
+
+        Same rules, same output dict - the file object supplies the
+        classification, metrics and report date directly.
+        """
+        if not isinstance(extracted_file, ExtractedFile):
+            raise TypeError("process_file expects an ExtractedFile object.")
+        if not extracted_file.is_medical_report:
+            return self._not_medical_result(extracted_file.classification_reason)
+
+        current_metrics = extracted_file.metrics
+        if not extracted_file.has_measurements():
+            return self._rejected_result(current_metrics, extracted_file.report_date)
+
+        findings = self.evaluate(current_metrics, historical_records)
+        return self._finalise(current_metrics, extracted_file.report_date, findings)
+
+    def _not_medical_result(self, reason: Optional[str]) -> Dict[str, Any]:
+        """Result for a file the AI classified as not a medical report."""
+        return {
+            "metrics": self._flatten_ai_metrics(None),
+            "ai_extracted_date": None,
+            "urgent_findings": [],
+            "flagged_trends": [],
+            "recent_changes": [],
+            "risk_score": 0,
+            "decision": Decision.NOT_MEDICAL_REPORT.value,
+            "recommended_action": (
+                "The uploaded file does not appear to be a medical "
+                "report. Please upload a valid medical report "
+                "containing health-related examination or test "
+                "information."
+            ), "requires_doctor_review": False,
+            "summary": reason or (
+                "The uploaded file does not appear to be a medical report."
+            ),
+        }
+
+    @staticmethod
+    def _rejected_result(current_metrics: Dict[str, Optional[float]],
+                         ai_extracted_date: Optional[str]) -> Dict[str, Any]:
+        """Result for a medical report with no usable measurements."""
+        return {
+            "metrics": current_metrics,
+            "ai_extracted_date": ai_extracted_date,
+            "urgent_findings": [],
+            "flagged_trends": [],
+            "recent_changes": [],
+            "risk_score": 0,
+            "decision": Decision.REJECTED.value,
+            "recommended_action": (
+                "No reliable measurements could be extracted from this "
+                "report. Please try uploading a clearer copy."
+            ),
+            "requires_doctor_review": False,
+            "summary": (
+                "No usable measurements were extracted from this report."
+            ),
+        }
 
     def _finalise(self, current_metrics: Dict[str, Optional[float]],
                   ai_extracted_date: Optional[str],
@@ -436,6 +484,16 @@ def validate_medical_profile(profile):
 def enforce_safety_guardrails(ai_explanation):
     """Backwards-compatible shim -> SafetyGuardrail.enforce()."""
     return _default_guardrail.enforce(ai_explanation)
+
+
+def apply_safety_guardrail(ai_text):
+    """Shim -> LogicManager.apply_safety_guardrail() on the shared manager.
+
+    Routes through the manager (not the guardrail directly) so the
+    guardrail the LogicManager owns is the one that runs - which is what
+    makes the "never diagnose" rule enforced, not merely available.
+    """
+    return _default_logic_manager.apply_safety_guardrail(ai_text)
 
 # ==========================================
 # DEMO (local execution only)

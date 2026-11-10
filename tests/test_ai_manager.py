@@ -68,6 +68,22 @@ class TestResponseParser:
     def test_rejects_everything_else_without_raising(self, raw):
         assert ResponseParser().parse(raw) is None
 
+    @pytest.mark.parametrize("raw", [
+        '```json\n{"a": 1}\n```',
+        '```\n{"a": 1}\n```',
+        '  ```json\n{"a": 1}\n```  \n',
+    ])
+    def test_accepts_json_object_in_code_fence(self, raw):
+        assert ResponseParser().parse(raw) == {"a": 1}
+
+    @pytest.mark.parametrize("raw", ['```json\n[1, 2]\n```', '```json\nnot json\n```', '```json```'])
+    def test_rejects_bad_content_inside_code_fence(self, raw):
+        assert ResponseParser().parse(raw) is None
+
+    def test_verification_reply_in_code_fence_is_accepted(self):
+        parsed = ResponseParser().parse("```json\n" + all_supported_json() + "\n```")
+        assert parsed is not None and VerificationTask(ResponseParser()).validate(parsed)
+
 
 # ---------------------------------------------------------------------------
 # ExtractionTask.validate (response schema)
