@@ -20,6 +20,7 @@ from data_layer import (
 )
 from data_manager import DataManager
 from file import ExtractedFile
+from logic_manager import LogicManager
 from user import User
 
 
@@ -137,3 +138,43 @@ def test_extract_file_rejects_invalid_ai_values():
 
 def test_extract_file_returns_none_when_ai_fails():
     assert AIManager(MockAIClient([])).extract_file(b"pdf", "application/pdf", "lab.pdf") is None
+
+
+# ---------------------------------------------------------------------------
+# LogicManager <- ExtractedFile
+# ---------------------------------------------------------------------------
+
+HISTORY = [
+    {"metrics": {"heart_rate": 70, "blood_glucose": 5.0}, "date": "2025-12-01"},
+    {"metrics": {"heart_rate": 80}, "date": "2025-12-15"},
+]
+
+
+@pytest.mark.parametrize("heart_rate", [None, 60, 130, 200])
+@pytest.mark.parametrize("blood_glucose", [None, 5.0, 15.0])
+@pytest.mark.parametrize("history", [[], HISTORY])
+def test_process_file_matches_process(heart_rate, blood_glucose, history):
+    ai_result = json.loads(extraction_json(heart_rate=heart_rate, blood_glucose=blood_glucose))
+    extracted = ExtractedFile.from_ai_result("lab.pdf", "application/pdf", ai_result)
+    logic = LogicManager.default()
+    assert logic.process_file(extracted, history) == logic.process(ai_result, history)
+
+
+def test_process_file_not_medical_report():
+    selfie = ExtractedFile("selfie.jpg", "image/jpeg", False, "A photo of a cat.")
+    result = LogicManager.default().process_file(selfie, [])
+    assert result["decision"] == "NOT_MEDICAL_REPORT"
+    assert result["summary"] == "A photo of a cat."
+
+
+def test_process_file_without_measurements_is_rejected():
+    letter = ExtractedFile("letter.pdf", "application/pdf", True, "Referral letter.",
+                           report_date="2026-01-01")
+    result = LogicManager.default().process_file(letter, [])
+    assert result["decision"] == "REJECTED"
+    assert result["ai_extracted_date"] == "2026-01-01"
+
+
+def test_process_file_rejects_non_files():
+    with pytest.raises(TypeError):
+        LogicManager.default().process_file({"heart_rate": 72}, [])
