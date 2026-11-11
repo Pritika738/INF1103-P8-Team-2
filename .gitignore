@@ -10,6 +10,7 @@ venv/
 data/app.db
 data/consultation_pdfs/
 data/original_reports/
+data/medical_profile_pdfs/
 
 # Python test artifacts
 .pytest_cache/
