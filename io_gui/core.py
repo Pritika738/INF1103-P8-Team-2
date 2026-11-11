@@ -119,6 +119,10 @@ def severity_badge(severity):
             + s["label"] + "</span>")
 
 def go(page):
+    if page != st.session_state.get("page"):
+        # Leaving a page discards its unsaved edits, so it reloads from the
+        # database next time (used by the Medical Profile row editor).
+        st.session_state.pop("profile_draft", None)
     st.session_state.page = page
     st.rerun()
 

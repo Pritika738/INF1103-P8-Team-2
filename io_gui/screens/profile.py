@@ -127,10 +127,54 @@ def build_medical_profile_pdf(who, profile):
     except Exception as exc:
         return None, str(exc)
 
+# --- Editable rows (medications / allergies / emergency contacts) -----------
+# The rows being edited live in st.session_state[PROFILE_DRAFT_KEY], loaded
+# from the saved profile when the page is opened. Every row has a stable
+# "_id" used in its widget keys, so removing a row from the middle never
+# shifts typed values into the wrong row. Add/Remove only change this draft;
+# nothing is written to the database until "Save medical profile" is clicked.
+PROFILE_DRAFT_KEY = "profile_draft"
+ROW_SECTIONS = ("medications", "allergies", "emergency_contacts")
+
+
+def _load_draft(username, profile):
+    """The draft for `username`, built from the saved profile if there is none
+    yet (first visit, after navigating back to the page, or a different user)."""
+    draft = st.session_state.get(PROFILE_DRAFT_KEY)
+    if draft is None or draft.get("user") != username:
+        draft = {"user": username, "next_id": 0}
+        for section in ROW_SECTIONS:
+            draft[section] = []
+            for item in profile.get(section) or []:
+                draft[section].append({**item, "_id": draft["next_id"]})
+                draft["next_id"] += 1
+        st.session_state[PROFILE_DRAFT_KEY] = draft
+    return draft
+
+
+# Button callbacks run before the page is redrawn, so every row's widget
+# state is still intact when a row is added or removed.
+def _add_row(section):
+    draft = st.session_state[PROFILE_DRAFT_KEY]
+    draft[section].append({"_id": draft["next_id"]})
+    draft["next_id"] += 1
+
+
+def _remove_row(section, row_id):
+    draft = st.session_state[PROFILE_DRAFT_KEY]
+    draft[section] = [row for row in draft[section] if row["_id"] != row_id]
+
+
+def _remove_button(section, row_id, label):
+    st.button("Remove", key=f"{section}_remove_{row_id}", help=f"Remove {label}",
+              on_click=_remove_row, args=(section, row_id), width="stretch")
+
+
 def show_profile():
     hero("Medical Profile", "Your standing health information, ready for any appointment.")
     username = current_user()
     profile = data_service.load_medical_profile(username)
+    draft = _load_draft(username, profile)
 
     with st.container(border=True):
         st.subheader("Blood group")
@@ -141,67 +185,79 @@ def show_profile():
     with st.container(border=True):
         st.subheader("Medications")
         st.caption("List each current medication, its dose and how often you take it.")
-        med_count = st.number_input("How many medications?", min_value=0, max_value=20,
-                                    value=len(profile.get("medications", [])), step=1, key="med_count")
         medications = []
-        for i in range(int(med_count)):
-            existing = profile["medications"][i] if i < len(profile.get("medications", [])) else {}
-            st.markdown(f"*Medication {i + 1}*")
-            cols = st.columns([3, 2, 2, 3])
+        if not draft["medications"]:
+            st.caption("No medications added.")
+        for n, row in enumerate(draft["medications"], start=1):
+            rid = row["_id"]
+            st.markdown(f"*Medication {n}*")
+            cols = st.columns([3, 2, 2, 3, 1.3], vertical_alignment="bottom")
             with cols[0]:
-                name = st.text_input("Name", value=existing.get("name", ""), key=f"med_name_{i}")
+                name = st.text_input("Name", value=row.get("name", ""), key=f"med_name_{rid}")
             with cols[1]:
-                amount = st.text_input("Dose amount", value=str(existing.get("dosage_amount") or ""), key=f"med_amt_{i}")
+                amount_saved = row.get("dosage_amount")
+                amount = st.text_input("Dose amount", value="" if amount_saved is None else str(amount_saved),
+                                       key=f"med_amt_{rid}")
             with cols[2]:
-                unit_existing = existing.get("dosage_unit", "")
+                unit_existing = row.get("dosage_unit", "")
                 unit_index = DOSAGE_UNIT_OPTIONS.index(unit_existing) if unit_existing in DOSAGE_UNIT_OPTIONS else 0
-                unit = st.selectbox("Unit", DOSAGE_UNIT_OPTIONS, index=unit_index, key=f"med_unit_{i}")
+                unit = st.selectbox("Unit", DOSAGE_UNIT_OPTIONS, index=unit_index, key=f"med_unit_{rid}")
             with cols[3]:
-                freq = st.text_input("Frequency", value=existing.get("frequency", ""),
-                                     key=f"med_freq_{i}", placeholder="e.g. twice daily")
+                freq = st.text_input("Frequency", value=row.get("frequency", ""),
+                                     key=f"med_freq_{rid}", placeholder="e.g. twice daily")
+            with cols[4]:
+                _remove_button("medications", rid, f"medication {n}")
             medications.append({"name": name, "dosage_amount": amount, "dosage_unit": unit, "frequency": freq})
+        st.button("+ Add medication", key="medications_add", on_click=_add_row, args=("medications",))
 
     with st.container(border=True):
         st.subheader("Allergies")
-        allergy_count = st.number_input("How many allergies?", min_value=0, max_value=20,
-                                        value=len(profile.get("allergies", [])), step=1, key="allergy_count")
         allergies = []
-        for i in range(int(allergy_count)):
-            existing = profile["allergies"][i] if i < len(profile.get("allergies", [])) else {}
-            st.markdown(f"*Allergy {i + 1}*")
-            cols = st.columns([3, 3, 2])
+        if not draft["allergies"]:
+            st.caption("No allergies added.")
+        for n, row in enumerate(draft["allergies"], start=1):
+            rid = row["_id"]
+            st.markdown(f"*Allergy {n}*")
+            cols = st.columns([3, 3, 2, 1.3], vertical_alignment="bottom")
             with cols[0]:
-                allergen = st.text_input("Allergen", value=existing.get("allergen", ""), key=f"alg_name_{i}")
+                allergen = st.text_input("Allergen", value=row.get("allergen", ""), key=f"alg_name_{rid}")
             with cols[1]:
-                reaction = st.text_input("Reaction", value=existing.get("reaction", ""),
-                                         key=f"alg_react_{i}", placeholder="e.g. skin/eye")
+                reaction = st.text_input("Reaction", value=row.get("reaction", ""),
+                                         key=f"alg_react_{rid}", placeholder="e.g. skin/eye")
             with cols[2]:
                 sev_options = ["", "mild", "moderate", "severe"]
-                sev_existing = str(existing.get("severity", "")).lower()
+                sev_existing = str(row.get("severity", "")).lower()
                 sev_index = sev_options.index(sev_existing) if sev_existing in sev_options else 0
-                severity = st.selectbox("Severity", sev_options, index=sev_index, key=f"alg_sev_{i}")
+                severity = st.selectbox("Severity", sev_options, index=sev_index, key=f"alg_sev_{rid}")
+            with cols[3]:
+                _remove_button("allergies", rid, f"allergy {n}")
             allergies.append({"allergen": allergen, "reaction": reaction, "severity": severity})
+        st.button("+ Add allergy", key="allergies_add", on_click=_add_row, args=("allergies",))
 
     with st.container(border=True):
         st.subheader("Emergency contacts")
-        contact_count = st.number_input("How many contacts?", min_value=0, max_value=10,
-                                        value=len(profile.get("emergency_contacts", [])), step=1, key="contact_count")
         emergency_contacts = []
-        for i in range(int(contact_count)):
-            existing = profile["emergency_contacts"][i] if i < len(profile.get("emergency_contacts", [])) else {}
-            st.markdown(f"*Contact {i + 1}*")
-            cols = st.columns([3, 2, 3, 3])
+        if not draft["emergency_contacts"]:
+            st.caption("No emergency contacts added.")
+        for n, row in enumerate(draft["emergency_contacts"], start=1):
+            rid = row["_id"]
+            st.markdown(f"*Contact {n}*")
+            cols = st.columns([3, 2, 3, 3, 1.3], vertical_alignment="bottom")
             with cols[0]:
-                name = st.text_input("Name", value=existing.get("name", ""), key=f"ec_name_{i}")
+                name = st.text_input("Name", value=row.get("name", ""), key=f"ec_name_{rid}")
             with cols[1]:
-                relationship = st.text_input("Relationship", value=existing.get("relationship", ""),
-                                             key=f"ec_rel_{i}", placeholder="e.g. mother")
+                relationship = st.text_input("Relationship", value=row.get("relationship", ""),
+                                             key=f"ec_rel_{rid}", placeholder="e.g. mother")
             with cols[2]:
-                phone = st.text_input("Phone (with country code)", value=existing.get("phone", ""),
-                                      key=f"ec_phone_{i}", placeholder="e.g. +65 1234 5678")
+                phone = st.text_input("Phone (with country code)", value=row.get("phone", ""),
+                                      key=f"ec_phone_{rid}", placeholder="e.g. +65 1234 5678")
             with cols[3]:
-                email = st.text_input("Email", value=existing.get("email", ""), key=f"ec_email_{i}")
+                email = st.text_input("Email", value=row.get("email", ""), key=f"ec_email_{rid}")
+            with cols[4]:
+                _remove_button("emergency_contacts", rid, f"contact {n}")
             emergency_contacts.append({"name": name, "relationship": relationship, "phone": phone, "email": email})
+        st.button("+ Add emergency contact", key="emergency_contacts_add",
+                  on_click=_add_row, args=("emergency_contacts",))
 
     with st.container(border=True):
         st.subheader("Hereditary illness")
@@ -219,8 +275,13 @@ def show_profile():
         other = st.text_input("Other hereditary condition", value=hereditary.get("other", ""))
         notes = st.text_input("Notes (e.g. which relative)", value=hereditary.get("notes", ""))
 
+    # Reminder only while there are unsaved row changes (not on the save click itself).
+    rows_changed = any(len(draft[s]) != len(profile.get(s) or []) for s in ROW_SECTIONS)
+    if rows_changed and not st.session_state.get("profile_save"):
+        st.info("You have added or removed rows. Click **Save medical profile** to keep the changes.")
+
     st.write("")
-    if st.button("Save medical profile", type="primary", width="stretch"):
+    if st.button("Save medical profile", type="primary", width="stretch", key="profile_save"):
         raw_profile = {
             "blood_group": "" if blood_group_choice == "Not set" else blood_group_choice,
             "medications": medications, "allergies": allergies,
@@ -236,6 +297,9 @@ def show_profile():
             for message in errors:
                 st.write("- " + message)
         elif data_service.save_medical_profile(username, cleaned):
+            # Rebuild the rows from what was stored next time the page draws
+            # (the validator drops fully blank rows).
+            st.session_state.pop(PROFILE_DRAFT_KEY, None)
             st.success("Medical profile saved successfully.")
             pdf_bytes, pdf_error = build_medical_profile_pdf(display_name() or username, cleaned)
             if pdf_error:
