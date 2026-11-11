@@ -193,7 +193,11 @@ def inject_css():
             box-shadow: 0 0 20px var(--accent-glow);
         }
 
-        .stButton > button {
+        /* One look for every button: normal (st.button), form submit
+           (st.form_submit_button - e.g. Log In) and download buttons. */
+        .stButton > button,
+        .stFormSubmitButton > button,
+        .stDownloadButton > button {
             border-radius: 16px;
             border: 1.5px solid var(--border-strong);
             padding: 0.6rem 1.15rem;
@@ -202,13 +206,16 @@ def inject_css():
             color: var(--text-strong) !important;
             transition: all 0.25s cubic-bezier(0.34,1.56,0.64,1);
         }
-        .stButton > button:hover {
+        .stButton > button:hover,
+        .stFormSubmitButton > button:hover,
+        .stDownloadButton > button:hover {
             border-color: var(--accent);
             color: var(--text-strong) !important;
             transform: translateY(-2px) scale(1.02);
             box-shadow: 0 12px 28px rgba(167,139,250,0.34);
         }
-        button[kind="primary"] {
+        button[kind="primary"],
+        button[kind="primaryFormSubmit"] {
             background: linear-gradient(100deg,#a78bfa,#8b5cf6 45%,#5eead4) !important;
             border: none !important;
             color: #17123a !important;
@@ -217,7 +224,8 @@ def inject_css():
             transition: background-position 0.5s ease, transform 0.25s ease, box-shadow 0.25s ease !important;
             font-weight: 800 !important;
         }
-        button[kind="primary"]:hover {
+        button[kind="primary"]:hover,
+        button[kind="primaryFormSubmit"]:hover {
             transform: translateY(-2px) scale(1.02);
             background-position: 100% 0 !important;
             box-shadow: 0 18px 42px rgba(167,139,250,0.65) !important;
@@ -299,14 +307,17 @@ def inject_css():
                 background: rgba(124,58,237,0.12);
                 border-color: rgba(124,58,237,0.4);
             }
-            .stButton > button:hover {
+            .stButton > button:hover,
+            .stFormSubmitButton > button:hover,
+            .stDownloadButton > button:hover {
                 box-shadow: 0 12px 28px rgba(124,58,237,0.22);
             }
             div[data-testid="stMetric"]:hover {
                 border-color: rgba(124,58,237,0.45);
                 box-shadow: 0 24px 54px rgba(124,58,237,0.18);
             }
-            button[kind="primary"] { color: #1e1240 !important; }
+            button[kind="primary"],
+            button[kind="primaryFormSubmit"] { color: #1e1240 !important; }
         }
         </style>
         """,
