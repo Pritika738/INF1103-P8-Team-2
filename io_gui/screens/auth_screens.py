@@ -24,9 +24,13 @@ def show_login():
         )
         with st.container(border=True):
             st.subheader("Welcome back")
-            username = st.text_input("Username", key="login_username")
-            password = st.text_input("Password", type="password", key="login_password")
-            if st.button("Log In", type="primary", width="stretch"):
+            # A form submits when Enter is pressed in either field, so the
+            # user can log in from the keyboard without clicking the button.
+            with st.form("login_form", border=False):
+                username = st.text_input("Username", key="login_username")
+                password = st.text_input("Password", type="password", key="login_password")
+                submitted = st.form_submit_button("Log In", type="primary", width="stretch")
+            if submitted:
                 if not username.strip():
                     st.error("Please enter your username.")
                 elif not password:
